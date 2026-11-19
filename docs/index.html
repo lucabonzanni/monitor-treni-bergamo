@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treni a Bergamo: puntualità, ritardi e soppressioni</title>
+<meta name="description" content="Monitoraggio quotidiano dei treni in arrivo e in partenza dalla stazione di Bergamo: ritardi, soppressioni, giorni critici e direttrici. Dati ViaggiaTreno, aggiornati in automatico.">
+<meta property="og:title" content="Treni a Bergamo: puntualità, ritardi e soppressioni">
+<meta property="og:description" content="Quanto sono puntuali i treni di Bergamo? Il monitor che si aggiorna da solo.">
+<meta property="og:type" content="website">
+<style>
+:root{
+  color-scheme: light;
+  --surface:#fcfcfb; --card:#ffffff; --ink:#0b0b0b; --ink2:#52514e; --muted:#74736f;
+  --line:#e4e3df; --grid:#eceae6; --hover:rgba(11,11,11,.05);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --ok:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --accent:#184f95;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --surface:#1a1a19; --card:#222221; --ink:#f0efec; --ink2:#c3c2b7; --muted:#97968c;
+    --line:#383835; --grid:#2e2e2c; --hover:rgba(240,239,236,.08);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --accent:#86b6ef;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--surface);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:980px;margin:0 auto;padding:0 18px 60px}
+header.top{padding:34px 0 8px}
+.kicker{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+h1{font-size:clamp(26px,4.6vw,40px);line-height:1.15;margin:0 0 10px;letter-spacing:-.01em}
+.sub{font-size:18px;color:var(--ink2);margin:0 0 14px;max-width:46em}
+.agg{font-size:14px;color:var(--muted);margin:0 0 14px}
+nav.ancore{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:10px 0 0}
+nav.ancore a{text-decoration:none}
+nav.ancore a:hover{text-decoration:underline}
+.share{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;padding:10px 0 0;color:var(--muted);align-items:center}
+.share a,.share button{color:var(--accent);background:none;border:0;padding:0;font:inherit;cursor:pointer;text-decoration:none}
+.share a:hover,.share button:hover{text-decoration:underline}
+h2{font-size:24px;margin:46px 0 6px;letter-spacing:-.005em}
+h2 + .lead{margin:0 0 14px;color:var(--ink2)}
+h3{font-size:17px;margin:0 0 2px}
+.banner{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--s1);border-radius:8px;padding:10px 14px;font-size:14.5px;color:var(--ink2);margin:14px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 16px 12px;margin:14px 0}
+.card .sottotitolo{margin:0 0 10px;font-size:14px;color:var(--ink2)}
+.card .head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.toggle{flex:none;font:inherit;font-size:13px;color:var(--accent);background:none;border:1px solid var(--line);border-radius:999px;padding:3px 11px;cursor:pointer}
+.toggle:hover{background:var(--hover)}
+.fonte{font-size:12.5px;color:var(--muted);margin:10px 0 0}
+.fonte b{color:var(--ink2)}
+.legenda{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;color:var(--ink2);margin:0 0 6px}
+.legenda span.v{display:inline-flex;align-items:center;gap:6px}
+.legenda i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.chart{width:100%;position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart .msg{padding:26px 8px;color:var(--muted);font-size:14.5px;text-align:center}
+svg text{font:12px system-ui,sans-serif;fill:var(--muted)}
+svg .ax{stroke:var(--grid);stroke-width:1}
+svg .base{stroke:var(--line);stroke-width:1}
+svg .cat{fill:var(--ink2)}
+svg .hit{fill:transparent;cursor:crosshair}
+svg .hit:hover,svg .hit:focus{fill:var(--hover);outline:none}
+svg .cross{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}
+.tabella{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-weight:600;color:var(--ink2);font-size:13px;background:transparent}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+th.ord{cursor:pointer;user-select:none}
+th.ord:hover{color:var(--ink)}
+tbody tr:hover{background:var(--hover)}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:12px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.tile .l{font-size:13px;color:var(--ink2)}
+.tile .big{font-size:34px;font-weight:650;line-height:1.15;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.tile .d{font-size:12.5px;color:var(--muted)}
+.filtri{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0 4px}
+.filtri button{font:inherit;font-size:14px;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:5px 14px;cursor:pointer}
+.filtri button[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.filtri .nota{font-size:13px;color:var(--muted);margin-left:4px}
+.stato{display:inline-flex;align-items:center;gap:6px}
+.stato i{display:inline-block;width:10px;height:10px;border-radius:50%}
+.stato .ico{font-weight:700;font-size:12px;width:14px;text-align:center}
+.sc{max-height:440px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.sc table th{position:sticky;top:0;background:var(--card);z-index:1}
+.ctrl{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 10px;font-size:14px}
+.ctrl input[type=search],.ctrl select{font:inherit;font-size:14px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.ctrl label{color:var(--ink2)}
+.tip{position:fixed;z-index:50;display:none;pointer-events:none;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;box-shadow:0 4px 18px rgba(0,0,0,.18);max-width:290px}
+.tip .tip-t{font-weight:600;margin-bottom:4px}
+.tip .tip-r{display:flex;align-items:center;gap:7px;margin-top:2px}
+.tip .key{width:14px;height:3px;border-radius:2px;flex:none}
+.tip strong{font-variant-numeric:tabular-nums}
+.tip .nome{color:var(--ink2)}
+.met li{margin:7px 0}
+.met b{color:var(--ink)}
+ul.dl{padding-left:18px}
+details summary{cursor:pointer;color:var(--accent)}
+details .files{columns:3 150px;font-size:14px;margin-top:8px}
+button.link{background:none;border:0;color:var(--accent);font:inherit;cursor:pointer;padding:0}
+footer{margin-top:50px;padding-top:16px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted)}
+.hidden{display:none!important}
+@media (max-width:560px){ .tile .big{font-size:28px} .card{padding:12px 10px 10px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="kicker">Monitor · Stazione di Bergamo</p>
+  <h1>Quanto sono puntuali i treni di Bergamo?</h1>
+  <p class="sub">Tutti i treni in arrivo e in partenza dalla stazione, registrati ogni giorno: minuti di ritardo, soppressioni, giorni più critici e direttrici più in difficoltà.</p>
+  <p class="agg" id="agg">Caricamento dati…</p>
+  <nav class="ancore" aria-label="Sezioni">
+    <a href="#oggi">Oggi</a><a href="#andamento">Andamento</a><a href="#giorni">Giorni della settimana</a><a href="#direttrici">Direttrici</a><a href="#orari">Fasce orarie</a><a href="#treni">Storico per treno</a><a href="#dati">Scarica i dati</a><a href="#metodologia">Metodologia</a>
+  </nav>
+  <div class="share" id="share"></div>
+</header>
+
+<main>
+  <h2 id="oggi">Oggi in stazione</h2>
+  <p class="lead" id="oggi-sub"></p>
+  <div id="oggi-box"></div>
+
+  <h2 id="quadro">Il quadro complessivo</h2>
+  <div class="filtri" id="filtri" role="group" aria-label="Periodo"></div>
+  <div id="avviso"></div>
+  <div class="kpi" id="kpi"></div>
+
+  <h2 id="andamento">Andamento giorno per giorno</h2>
+  <div id="c-andamento"></div>
+
+  <h2 id="giorni">Ci sono giorni più critici?</h2>
+  <div id="c-giorni"></div>
+
+  <h2 id="direttrici">Direttrici</h2>
+  <div id="c-direttrici"></div>
+
+  <h2 id="orari">A che ora si accumulano i disservizi</h2>
+  <div id="c-orari"></div>
+
+  <h2 id="treni">Storico per treno</h2>
+  <div id="c-treni"></div>
+
+  <h2 id="dati">Scarica i dati</h2>
+  <div id="dati-box"></div>
+
+  <h2 id="metodologia">Metodologia, note e avvertenze</h2>
+  <ul class="met" id="metodologia-box"></ul>
+</main>
+
+<footer>
+  Un progetto di <a href="https://leggegrandinumeri.substack.com">Luca Bonzanni</a> · dati ViaggiaTreno, elaborazione propria · <a href="https://github.com/lucabonzanni/monitor-treni-bergamo">codice e dati su GitHub</a>
+</footer>
+</div>
+
+<script>
+"use strict";
+/* ---------- utilità DOM ---------- */
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, props, ...kids){
+  const e = document.createElement(tag);
+  if(props) for(const [k,v] of Object.entries(props)){
+    if(v===false||v==null) continue;
+    if(k==="class") e.className=v;
+    else if(k==="text") e.textContent=v;
+    else if(k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v===true?"":v);
+  }
+  for(const c of kids.flat()) if(c!=null) e.append(c.nodeType? c : document.createTextNode(String(c)));
+  return e;
+}
+function sv(tag, attrs, ...kids){
+  const e = document.createElementNS(NS, tag);
+  if(attrs) for(const [k,v] of Object.entries(attrs)) if(v!=null) e.setAttribute(k, v);
+  for(const c of kids.flat()) if(c!=null) e.append(c.nodeType? c : document.createTextNode(String(c)));
+  return e;
+}
+const nf1 = new Intl.NumberFormat("it-IT",{minimumFractionDigits:1,maximumFractionDigits:1});
+const nf0 = new Intl.NumberFormat("it-IT",{maximumFractionDigits:0});
+const f1 = v => v==null ? "–" : nf1.format(v);
+const f0 = v => v==null ? "–" : nf0.format(v);
+const fp = v => v==null ? "–" : nf1.format(v)+"%";
+const dm = iso => iso.slice(8,10)+"/"+iso.slice(5,7);
+const dataLunga = iso => new Date(iso+"T12:00:00").toLocaleDateString("it-IT",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+const DIREZ = {partenza:"Partenza", arrivo:"Arrivo", tutte:"Tutte"};
+const NOMI_CORTI = {"Lunedì":"Lun","Martedì":"Mar","Mercoledì":"Mer","Giovedì":"Gio","Venerdì":"Ven","Sabato":"Sab","Domenica":"Dom"};
+
+/* ---------- tooltip ---------- */
+const tip = el("div",{class:"tip",role:"tooltip"});
+document.body.append(tip);
+function showTip(x, y, titolo, righe){
+  tip.replaceChildren(
+    el("div",{class:"tip-t",text:titolo}),
+    ...righe.map(r => el("div",{class:"tip-r"},
+      r.colore ? el("span",{class:"key",style:"background:"+r.colore}) : null,
+      el("strong",{text:r.valore}), el("span",{class:"nome",text:r.nome}))));
+  tip.style.display="block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let px = x+14, py = y+14;
+  if(px+w > innerWidth-8) px = x-w-14;
+  if(py+h > innerHeight-8) py = y-h-14;
+  tip.style.left = Math.max(8,px)+"px"; tip.style.top = Math.max(8,py)+"px";
+}
+function hideTip(){ tip.style.display="none"; }
+function tipDaElemento(elem, titolo, righe){
+  const r = elem.getBoundingClientRect();
+  showTip(r.left + r.width/2, r.top + r.height/2, titolo, righe);
+}
+
+/* ---------- scale ---------- */
+function niceMax(v){
+  for(const m of [4,8,12,20,40,60,80,100]) if(v*1.05 <= m) return m;
+  return 100;
+}
+const SERIE_COL = {s1:"var(--s1)", s2:"var(--s2)", s3:"var(--s3)"};
+
+/* ---------- grafico a barre raggruppate (verticale / orizzontale) ---------- */
+function barre(c, o){
+  c.replaceChildren();
+  const W = Math.max(280, c.clientWidth || 640);
+  const nS = o.serie.length, nC = o.cats.length;
+  const vmax = Math.max(1, ...o.serie.flatMap(s => s.valori.map(v => v||0)));
+  const max = niceMax(vmax);
+  const gap = 2;
+  const orizz = !!o.orizz;
+  let svg;
+  if(!orizz){
+    const L=42, R=8, T=8, B=36, H=270, pw=W-L-R, ph=H-T-B, band=pw/nC;
+    svg = sv("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||""});
+    for(let i=0;i<=4;i++){
+      const y = T + ph - ph*i/4;
+      svg.append(sv("line",{x1:L,x2:W-R,y1:y,y2:y,class:i===0?"base":"ax"}));
+      svg.append(sv("text",{x:L-6,y:y+4,"text-anchor":"end"},(max*i/4)+"%"));
+    }
+    const bw = Math.max(4, Math.min(26, (band*0.78 - (nS-1)*gap)/nS));
+    const tot = nS*bw + (nS-1)*gap;
+    o.cats.forEach((cat,i)=>{
+      const x0 = L + i*band + (band-tot)/2;
+      o.serie.forEach((s,j)=>{
+        const v = s.valori[i]; if(!v) return;
+        const h = Math.max(1, ph*v/max), x = x0 + j*(bw+gap), y = T+ph-h, r = Math.min(4,h,bw/2);
+        svg.append(sv("path",{d:`M${x},${T+ph} L${x},${y+r} Q${x},${y} ${x+r},${y} L${x+bw-r},${y} Q${x+bw},${y} ${x+bw},${y+r} L${x+bw},${T+ph} Z`,style:"fill:"+SERIE_COL[s.cls]}));
+      });
+      svg.append(sv("text",{x:L+i*band+band/2,y:H-B+17,"text-anchor":"middle",class:"cat"}, band<70 && cat.corta ? cat.corta : cat.label));
+      const hit = sv("rect",{x:L+i*band,y:T,width:band,height:ph,class:"hit",tabindex:"0","aria-label":cat.titolo+": "+o.serie.map(s=>s.nome+" "+s.testi[i]).join(", ")});
+      const mostra = (ev)=>{ const righe=o.serie.map(s=>({colore:SERIE_COL[s.cls],valore:s.testi[i],nome:s.nome})).concat(cat.extra?cat.extra.map(t=>({valore:t,nome:""})):[]);
+        ev.clientX!=null && ev.type!=="focus" ? showTip(ev.clientX,ev.clientY,cat.titolo,righe) : tipDaElemento(hit,cat.titolo,righe); };
+      hit.addEventListener("pointermove",mostra); hit.addEventListener("focus",mostra);
+      hit.addEventListener("pointerleave",hideTip); hit.addEventListener("blur",hideTip);
+      svg.append(hit);
+    });
+  } else {
+    const bh = 11, rowH = nS*bh+(nS-1)*gap+16, T=6, B=24, H=T+B+rowH*nC;
+    const L = Math.min(170, Math.round(W*0.34)), R=14, pw=W-L-R;
+    svg = sv("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||""});
+    for(let i=0;i<=4;i++){
+      const x = L + pw*i/4;
+      svg.append(sv("line",{x1:x,x2:x,y1:T,y2:H-B,class:i===0?"base":"ax"}));
+      svg.append(sv("text",{x:x,y:H-B+16,"text-anchor":"middle"},(max*i/4)+"%"));
+    }
+    o.cats.forEach((cat,i)=>{
+      const y0 = T + i*rowH + 8;
+      o.serie.forEach((s,j)=>{
+        const v = s.valori[i]; if(!v) return;
+        const w = Math.max(1, pw*v/max), y = y0 + j*(bh+gap), r = Math.min(4,w,bh/2);
+        svg.append(sv("path",{d:`M${L},${y} L${L+w-r},${y} Q${L+w},${y} ${L+w},${y+r} L${L+w},${y+bh-r} Q${L+w},${y+bh} ${L+w-r},${y+bh} L${L},${y+bh} Z`,style:"fill:"+SERIE_COL[s.cls]}));
+      });
+      svg.append(sv("text",{x:L-8,y:y0+(nS*bh+(nS-1)*gap)/2+4,"text-anchor":"end",class:"cat"},cat.label));
+      const hit = sv("rect",{x:0,y:T+i*rowH,width:W,height:rowH,class:"hit",tabindex:"0","aria-label":cat.titolo+": "+o.serie.map(s=>s.nome+" "+s.testi[i]).join(", ")});
+      const mostra = (ev)=>{ const righe=o.serie.map(s=>({colore:SERIE_COL[s.cls],valore:s.testi[i],nome:s.nome})).concat(cat.extra?cat.extra.map(t=>({valore:t,nome:""})):[]);
+        ev.clientX!=null && ev.type!=="focus" ? showTip(ev.clientX,ev.clientY,cat.titolo,righe) : tipDaElemento(hit,cat.titolo,righe); };
+      hit.addEventListener("pointermove",mostra); hit.addEventListener("focus",mostra);
+      hit.addEventListener("pointerleave",hideTip); hit.addEventListener("blur",hideTip);
+      svg.append(hit);
+    });
+  }
+  c.append(svg);
+}
+
+/* ---------- grafico a linee con mirino ---------- */
+function linee(c, o){
+  c.replaceChildren();
+  const n = o.x.length;
+  if(n < 2){ c.append(el("div",{class:"msg",text:"Servono almeno due giorni di dati per disegnare l'andamento."})); return; }
+  const W = Math.max(280, c.clientWidth || 640), L=42, R=14, T=10, B=30, H=270, pw=W-L-R, ph=H-T-B;
+  const vmax = Math.max(1, ...o.serie.flatMap(s => s.valori.map(v => v||0)));
+  const max = niceMax(vmax);
+  const X = i => L + pw*i/(n-1), Y = v => T + ph - ph*v/max;
+  const svg = sv("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||""});
+  for(let i=0;i<=4;i++){
+    const y = T + ph - ph*i/4;
+    svg.append(sv("line",{x1:L,x2:W-R,y1:y,y2:y,class:i===0?"base":"ax"}));
+    svg.append(sv("text",{x:L-6,y:y+4,"text-anchor":"end"},(max*i/4)+"%"));
+  }
+  const passo = Math.max(1, Math.ceil(n/7));
+  for(let i=0;i<n;i+=passo) svg.append(sv("text",{x:X(i),y:H-B+17,"text-anchor":"middle",class:"cat"},o.x[i].label));
+  o.serie.forEach(s=>{
+    let d="", aperto=false;
+    s.valori.forEach((v,i)=>{ if(v==null){aperto=false;return;} d += (aperto?"L":"M")+X(i)+","+Y(v)+" "; aperto=true; });
+    svg.append(sv("path",{d,fill:"none","stroke-width":2,"stroke-linejoin":"round","stroke-linecap":"round",style:"stroke:"+SERIE_COL[s.cls]}));
+    if(n<=40) s.valori.forEach((v,i)=>{ if(v==null) return;
+      const parz = o.x[i].parziale;
+      svg.append(sv("circle",{cx:X(i),cy:Y(v),r:4,"stroke-width":2,style:`fill:${parz?"var(--card)":SERIE_COL[s.cls]};stroke:${parz?SERIE_COL[s.cls]:"var(--card)"}`}));
+    });
+  });
+  const cross = sv("line",{class:"cross",y1:T,y2:T+ph,x1:0,x2:0,style:"display:none"});
+  svg.append(cross);
+  const hit = sv("rect",{x:L,y:T,width:pw,height:ph,class:"hit",tabindex:"0","aria-label":o.aria||"grafico"});
+  let idx = n-1;
+  const mostra = (i, px, py)=>{
+    idx = Math.max(0,Math.min(n-1,i));
+    cross.setAttribute("x1",X(idx)); cross.setAttribute("x2",X(idx)); cross.style.display="";
+    const righe = o.serie.map(s=>({colore:SERIE_COL[s.cls],valore:s.testi[idx],nome:s.nome}));
+    const titolo = o.x[idx].titolo;
+    if(px!=null) showTip(px,py,titolo,righe);
+    else { const r = hit.getBoundingClientRect(); showTip(r.left + (X(idx)-L)/pw*r.width + L*r.width/W, r.top+r.height/2, titolo, righe); }
+  };
+  hit.addEventListener("pointermove",ev=>{ const r=hit.getBoundingClientRect(); const rel=(ev.clientX-r.left)/r.width; mostra(Math.round(rel*(n-1)),ev.clientX,ev.clientY); });
+  hit.addEventListener("pointerleave",()=>{cross.style.display="none";hideTip();});
+  hit.addEventListener("focus",()=>mostra(idx));
+  hit.addEventListener("blur",()=>{cross.style.display="none";hideTip();});
+  hit.addEventListener("keydown",ev=>{ if(ev.key==="ArrowLeft"){mostra(idx-1);ev.preventDefault();} if(ev.key==="ArrowRight"){mostra(idx+1);ev.preventDefault();} });
+  svg.append(hit);
+  c.append(svg);
+}
+
+/* ---------- mappa di calore giorno × ora ---------- */
+function mappaCalore(c, o){
+  c.replaceChildren();
+  const ore = o.ore, W = Math.max(300, c.clientWidth || 640), L=38, R=6, T=6, B=26, rh=30, H=T+B+rh*7;
+  const cw = (W-L-R)/ore.length;
+  const svg = sv("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||""});
+  const vmax = Math.max(10, ...o.celle.filter(x=>x.effettuate>=o.minimo).map(x=>x.pct_ritardi_5||0));
+  const mappa = new Map(o.celle.map(x=>[x.dow+"-"+x.ora, x]));
+  o.giorni.forEach((nome,i)=> svg.append(sv("text",{x:L-6,y:T+i*rh+rh/2+4,"text-anchor":"end",class:"cat"},NOMI_CORTI[nome]||nome)));
+  ore.forEach((h,j)=>{ if(cw>=26 || j%2===0) svg.append(sv("text",{x:L+j*cw+cw/2,y:H-B+16,"text-anchor":"middle"},String(h))); });
+  o.giorni.forEach((nome,i)=> ore.forEach((h,j)=>{
+    const cella = mappa.get(i+"-"+h), x=L+j*cw, y=T+i*rh;
+    const ok = cella && cella.effettuate>=o.minimo;
+    const v = ok ? (cella.pct_ritardi_5||0) : null;
+    const r = sv("rect",{x:x+1,y:y+1,width:Math.max(1,cw-2),height:rh-2,rx:4,tabindex:cella?"0":null,
+      "aria-label": cella ? `${nome} ${h}:00: ${cella.pct_ritardi_5==null?"n.d.":f1(cella.pct_ritardi_5)+"%"} in ritardo, ${cella.effettuate} corse` : null,
+      style: ok ? `fill:var(--s1);fill-opacity:${(0.07+0.93*Math.min(1,v/vmax)).toFixed(3)}` : (cella ? "fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3" : "fill:var(--grid);fill-opacity:.4")});
+    if(cella){
+      const mostra = ev=>{ const righe=[{valore:cella.pct_ritardi_5==null?"–":f1(cella.pct_ritardi_5)+"%",nome:"ritardi da almeno 5'"},{valore:f1(cella.ritardo_medio),nome:"minuti di ritardo medio"},{valore:String(cella.effettuate),nome:"corse osservate"+(ok?"":" (poche: dato indicativo)")}];
+        const t=`${nome}, ${String(h).padStart(2,"0")}:00–${String(h).padStart(2,"0")}:59`;
+        ev.clientX!=null&&ev.type!=="focus" ? showTip(ev.clientX,ev.clientY,t,righe) : tipDaElemento(r,t,righe); };
+      r.addEventListener("pointermove",mostra); r.addEventListener("focus",mostra);
+      r.addEventListener("pointerleave",hideTip); r.addEventListener("blur",hideTip);
+    }
+    svg.append(r);
+    if(ok && cw>=30 && v>=0) svg.append(sv("text",{x:x+cw/2,y:y+rh/2+4,"text-anchor":"middle",style:"pointer-events:none;font-size:11px;fill:"+(v/vmax>0.55?"#ffffff":"var(--ink2)")},String(Math.round(v))));
+  }));
+  c.append(svg);
+  c.append(el("p",{class:"fonte",style:"margin:4px 0 0"},
+    "Colore più intenso = più ritardi da almeno 5'. Riquadri tratteggiati: meno di "+o.minimo+" corse, dato non affidabile."));
+}
+
+/* ---------- scheda con grafico + tabella ---------- */
+function scheda(contenitore, {titolo, sotto, disegna, tabella, legenda, fonte, id}){
+  const area = el("div",{class:"chart"});
+  const tab = el("div",{class:"tabella hidden"});
+  let visibile = false;
+  const btn = el("button",{type:"button",class:"toggle","aria-pressed":"false",text:"Mostra come tabella",onclick:()=>{
+    visibile = !visibile;
+    area.classList.toggle("hidden",visibile); tab.classList.toggle("hidden",!visibile);
+    if(legenda) leg.classList.toggle("hidden",visibile);
+    btn.setAttribute("aria-pressed",String(visibile));
+    btn.textContent = visibile ? "Mostra come grafico" : "Mostra come tabella";
+    if(!visibile) disegna(area);
+  }});
+  const leg = legenda ? el("div",{class:"legenda"},legenda.map(s=>el("span",{class:"v"},el("i",{style:"background:"+SERIE_COL[s.cls]}),s.nome))) : null;
+  const sec = el("section",{class:"card",id},
+    el("div",{class:"head"}, el("div",null,el("h3",{text:titolo}), sotto?el("p",{class:"sottotitolo",text:sotto}):null), btn),
+    leg, area, tab,
+    el("p",{class:"fonte"},el("b",{text:"Fonte: "}),fonte||"ViaggiaTreno (RFI/Trenitalia), elaborazione propria."));
+  contenitore.append(sec);
+  disegna(area);
+  const t = tabella();
+  tab.append(el("table",null,
+    el("thead",null,el("tr",null,t.head.map((h,i)=>el("th",{class:i>0&&t.num?"n":"",text:h})))),
+    el("tbody",null,t.rows.map(r=>el("tr",null,r.map((v,i)=>el("td",{class:i>0&&t.num?"n":"",text:v})))))));
+  let ultimaW = area.clientWidth;
+  if("ResizeObserver" in window) new ResizeObserver(()=>{ if(area.clientWidth!==ultimaW && !visibile){ ultimaW=area.clientWidth; disegna(area);} }).observe(area);
+}
+
+/* ---------- stato dei treni (oggi) ---------- */
+function statoTreno(r){
+  if(r.stato==="soppresso") return {testo:"Soppresso", colore:"var(--crit)", ico:"✕", ord:0};
+  if(r.stato==="nd") return {testo:"Dato non disponibile", colore:"var(--muted)", ico:"?", ord:5};
+  if(r.stato==="effettuato"){
+    const x = r.ritardo==null?0:r.ritardo;
+    if(x>=15) return {testo:`Ritardo grave: ${x}'`, colore:"var(--serious)", ico:"!!", ord:1};
+    if(x>=5) return {testo:`Ritardo: ${x}'`, colore:"var(--warn)", ico:"!", ord:2};
+    return {testo: x>0?`Puntuale (+${x}')`:"Puntuale", colore:"var(--ok)", ico:"✓", ord:3};
+  }
+  if(r.stato==="in_corso") return {testo:"In corso / atteso", colore:"var(--muted)", ico:"·", ord:4};
+  return {testo:"Programmato", colore:"var(--muted)", ico:"·", ord:4};
+}
+const chipStato = s => el("span",{class:"stato"},el("i",{style:"background:"+s.colore}),el("span",{class:"ico",text:s.ico}),s.testo);
+
+/* ---------- sezioni ---------- */
+let D = null, periodo = "tutto";
+const PERIODI = [["tutto","Da inizio rilevazione"],["30","Ultimi 30 giorni"],["7","Ultimi 7 giorni"]];
+
+function disegnaOggi(){
+  const box = document.getElementById("oggi-box"); box.replaceChildren();
+  const righe = D.oggi_elenco || [];
+  document.getElementById("oggi-sub").textContent = dataLunga(D.oggi) + (righe.length ? "" : ": ancora nessun treno registrato.");
+  if(!righe.length) return;
+  const eff = righe.filter(r=>r.stato==="effettuato"), rit5 = eff.filter(r=>(r.ritardo||0)>=5).length,
+        rit15 = eff.filter(r=>(r.ritardo||0)>=15).length, sop = righe.filter(r=>r.stato==="soppresso").length;
+  const attesi = righe.filter(r=>r.stato==="programmato"||r.stato==="in_corso").length;
+  box.append(el("div",{class:"kpi"},
+    tile("Treni già passati",f0(eff.length),`${f0(attesi)} ancora attesi`),
+    tile("In ritardo da 5'",f0(rit5),eff.length?fp(100*rit5/eff.length)+" dei passati":""),
+    tile("In ritardo da 15'",f0(rit15),eff.length?fp(100*rit15/eff.length)+" dei passati":""),
+    tile("Soppressi",f0(sop),`su ${f0(righe.length)} corse`)));
+  let soloAnomalie = false;
+  const wrap = el("div",{class:"sc"});
+  const cb = el("input",{type:"checkbox",id:"solo-anom",onchange:e=>{soloAnomalie=e.target.checked;ridisegna();}});
+  function ridisegna(){
+    const rs = righe.filter(r=>!soloAnomalie || r.stato==="soppresso" || (r.ritardo||0)>=5);
+    wrap.replaceChildren(el("table",null,
+      el("thead",null,el("tr",null,["Orario","Reale","","Treno","Tratta","Stato"].map(h=>el("th",{text:h})))),
+      el("tbody",null,rs.map(r=>el("tr",null,
+        el("td",{text:r.orario}), el("td",{text:r.reale||"–"}), el("td",{text:DIREZ[r.direzione]}),
+        el("td",{text:r.numero}), el("td",{text:(r.direzione==="partenza"?"Bergamo → ":"")+(r.controparte||"?")+(r.direzione==="arrivo"?" → Bergamo":"")}),
+        el("td",null,chipStato(statoTreno(r))))))));
+  }
+  box.append(el("div",{class:"ctrl"},cb,el("label",{for:"solo-anom",text:"Mostra solo ritardi da 5' e soppressioni"})));
+  ridisegna(); box.append(wrap);
+  box.append(el("p",{class:"fonte"},el("b",{text:"Fonte: "}),"ViaggiaTreno. «Reale» è l'orario effettivo registrato a Bergamo; per i treni non ancora passati il dato si completa nelle ore successive."));
+}
+
+function tile(l, big, d){ return el("div",{class:"tile"},el("div",{class:"l",text:l}),el("div",{class:"big",text:big}),el("div",{class:"d",text:d||" "})); }
+
+function disegnaFiltri(){
+  const f = document.getElementById("filtri"); f.replaceChildren();
+  PERIODI.forEach(([k,t])=> f.append(el("button",{type:"button","aria-pressed":String(periodo===k),text:t,onclick:()=>{periodo=k;disegnaPeriodo();}})));
+  f.append(el("span",{class:"nota",text:D.prima_data?`Dati dal ${dm(D.prima_data)}/${D.prima_data.slice(0,4)} al ${dm(D.ultima_data)}/${D.ultima_data.slice(0,4)} (${D.giorni_con_dati} giorni)`:""}));
+}
+
+function disegnaPeriodo(){
+  disegnaFiltri();
+  const P = D.periodi[periodo], T = P.totale;
+  const avviso = document.getElementById("avviso"); avviso.replaceChildren();
+  const kpi = document.getElementById("kpi"); kpi.replaceChildren();
+  const ids = ["c-andamento","c-giorni","c-direttrici","c-orari","c-treni"].map(i=>document.getElementById(i));
+  ids.forEach(e=>e.replaceChildren());
+  if(!T.programmate){
+    avviso.append(el("div",{class:"banner",text:"La raccolta è appena partita: i primi indicatori compariranno quando ci saranno treni con ritardo definitivo registrato."}));
+    ids.forEach(e=>e.append(el("p",{class:"lead",style:"color:var(--muted)",text:"Disponibile non appena la raccolta avrà registrato i primi treni."})));
+    return;
+  }
+  if(D.giorni_con_dati < 14)
+    avviso.append(el("div",{class:"banner",text:`Dati raccolti da ${D.giorni_con_dati} giorn${D.giorni_con_dati===1?"o":"i"}: i confronti per giorno della settimana, direttrice e singolo treno diventano significativi con qualche settimana di osservazioni. Tooltip e tabelle indicano sempre il numero di corse su cui si basa ogni valore.`}));
+  kpi.append(
+    tile("Corse analizzate",f0(T.programmate),`${f0(T.effettuate)} effettuate, ${f0(T.soppresse)} soppresse`),
+    tile("Ritardi da almeno 5'",fp(T.pct_ritardi_5),`${f0(T.n_ritardi_5)} su ${f0(T.effettuate)} effettuate`),
+    tile("Ritardi da almeno 15'",fp(T.pct_ritardi_15),`${f0(T.n_ritardi_15)} su ${f0(T.effettuate)} effettuate`),
+    tile("Soppressioni",fp(T.pct_soppresse),`${f0(T.soppresse)} su ${f0(T.programmate)} programmate`),
+    tile("Ritardo medio",T.ritardo_medio==null?"–":f1(T.ritardo_medio)+"′",`mediana ${f1(T.ritardo_mediano)}′ · massimo ${f0(T.ritardo_max)}′`));
+
+  const LEG = [{cls:"s1",nome:"Ritardi da almeno 5'"},{cls:"s2",nome:"Ritardi da almeno 15'"},{cls:"s3",nome:"Soppressioni"}];
+
+  /* andamento giornaliero */
+  const gg = P.giorni;
+  scheda(ids[0],{id:"g-andamento",titolo:"Percentuale di corse in ritardo e soppresse, per giorno",
+    sotto:"Ogni punto è un giorno. Il punto vuoto è il giorno in corso, ancora incompleto.",
+    legenda:LEG, fonte:"ViaggiaTreno, elaborazione propria. Ritardi: su corse effettuate. Soppressioni: su corse programmate.",
+    disegna:c=>linee(c,{aria:"Andamento giornaliero",x:gg.map(g=>({label:dm(g.data),titolo:dataLunga(g.data)+(g.parziale?" (in corso)":""),parziale:g.parziale})),
+      serie:[{cls:"s1",nome:LEG[0].nome,valori:gg.map(g=>g.pct_ritardi_5),testi:gg.map(g=>fp(g.pct_ritardi_5)+` (${g.n_ritardi_5}/${g.effettuate})`)},
+             {cls:"s2",nome:LEG[1].nome,valori:gg.map(g=>g.pct_ritardi_15),testi:gg.map(g=>fp(g.pct_ritardi_15)+` (${g.n_ritardi_15}/${g.effettuate})`)},
+             {cls:"s3",nome:LEG[2].nome,valori:gg.map(g=>g.pct_soppresse),testi:gg.map(g=>fp(g.pct_soppresse)+` (${g.soppresse}/${g.programmate})`)}]}),
+    tabella:()=>({num:true,head:["Giorno","Corse programmate","Effettuate","Soppresse","Ritardi ≥5'","% ≥5'","Ritardi ≥15'","% ≥15'","Ritardo medio (′)"],
+      rows:gg.map(g=>[dm(g.data)+(g.parziale?" (in corso)":""),f0(g.programmate),f0(g.effettuate),f0(g.soppresse),f0(g.n_ritardi_5),fp(g.pct_ritardi_5),f0(g.n_ritardi_15),fp(g.pct_ritardi_15),f1(g.ritardo_medio)])})});
+
+  /* giorni della settimana */
+  const dw = P.giorno_settimana;
+  scheda(ids[1],{id:"g-giorni",titolo:"Disservizi per giorno della settimana",
+    sotto:"Giorni completi (il giorno in corso è escluso). Il numero di giorni osservati è nel tooltip: con pochi giorni conta il singolo episodio.",
+    legenda:LEG, fonte:"ViaggiaTreno, elaborazione propria.",
+    disegna:c=>barre(c,{aria:"Disservizi per giorno della settimana",
+      cats:dw.map(d=>({label:d.nome,corta:NOMI_CORTI[d.nome],titolo:d.nome,extra:[`${d.giorni_osservati} giorni osservati, ${f0(d.programmate)} corse`]})),
+      serie:[{cls:"s1",nome:LEG[0].nome,valori:dw.map(d=>d.pct_ritardi_5),testi:dw.map(d=>fp(d.pct_ritardi_5))},
+             {cls:"s2",nome:LEG[1].nome,valori:dw.map(d=>d.pct_ritardi_15),testi:dw.map(d=>fp(d.pct_ritardi_15))},
+             {cls:"s3",nome:LEG[2].nome,valori:dw.map(d=>d.pct_soppresse),testi:dw.map(d=>fp(d.pct_soppresse))}]}),
+    tabella:()=>({num:true,head:["Giorno","Giorni osservati","Corse programmate","% ≥5'","% ≥15'","% soppresse","Ritardo medio (′)"],
+      rows:dw.map(d=>[d.nome,f0(d.giorni_osservati),f0(d.programmate),fp(d.pct_ritardi_5),fp(d.pct_ritardi_15),fp(d.pct_soppresse),f1(d.ritardo_medio)])})});
+
+  /* direttrici */
+  const dr = P.direttrici.filter(d=>d.direzione==="tutte" && d.programmate>0).sort((a,b)=>b.programmate-a.programmate);
+  const drDir = P.direttrici.filter(d=>d.programmate>0);
+  scheda(ids[2],{id:"g-direttrici",titolo:"Disservizi per direttrice",
+    sotto:"Partenze e arrivi insieme, raggruppati per capolinea. Le direttrici si definiscono nel file config/direttrici.csv.",
+    legenda:LEG, fonte:"ViaggiaTreno, elaborazione propria.",
+    disegna:c=>barre(c,{orizz:true,aria:"Disservizi per direttrice",
+      cats:dr.map(d=>({label:d.direttrice,titolo:d.direttrice,extra:[`${f0(d.programmate)} corse programmate`]})),
+      serie:[{cls:"s1",nome:LEG[0].nome,valori:dr.map(d=>d.pct_ritardi_5),testi:dr.map(d=>fp(d.pct_ritardi_5))},
+             {cls:"s2",nome:LEG[1].nome,valori:dr.map(d=>d.pct_ritardi_15),testi:dr.map(d=>fp(d.pct_ritardi_15))},
+             {cls:"s3",nome:LEG[2].nome,valori:dr.map(d=>d.pct_soppresse),testi:dr.map(d=>fp(d.pct_soppresse))}]}),
+    tabella:()=>({num:true,head:["Direttrice","Direzione","Corse programmate","Effettuate","Soppresse","% ≥5'","% ≥15'","% soppresse","Ritardo medio (′)"],
+      rows:drDir.map(d=>[d.direttrice,DIREZ[d.direzione],f0(d.programmate),f0(d.effettuate),f0(d.soppresse),fp(d.pct_ritardi_5),fp(d.pct_ritardi_15),fp(d.pct_soppresse),f1(d.ritardo_medio)])})});
+
+  /* fasce orarie: mappa di calore */
+  const hm = P.heatmap;
+  const ore = [...new Set(P.fasce_orarie.map(f=>f.ora))].sort((a,b)=>a-b);
+  const orePiene = ore.length ? Array.from({length:ore[ore.length-1]-ore[0]+1},(_,i)=>ore[0]+i) : [];
+  const nomiGiorni = P.giorno_settimana.map(d=>d.nome);
+  scheda(ids[3],{id:"g-orari",titolo:"Ritardi da almeno 5' per giorno e ora",
+    sotto:"Quanto pesano i ritardi nelle diverse ore della giornata, giorno per giorno. Ora = ora di orario programmato.",
+    fonte:"ViaggiaTreno, elaborazione propria. Giorni completi.",
+    disegna:c=>orePiene.length?mappaCalore(c,{aria:"Mappa di calore dei ritardi per giorno e ora",ore:orePiene,giorni:nomiGiorni,celle:hm,minimo:3}):c.append(el("div",{class:"msg",text:"Dati non ancora sufficienti."})),
+    tabella:()=>({num:true,head:["Giorno",...orePiene.map(h=>String(h))],
+      rows:nomiGiorni.map((n,i)=>[n,...orePiene.map(h=>{const x=hm.find(z=>z.dow===i&&z.ora===h);return x?(x.pct_ritardi_5==null?"–":f0(x.pct_ritardi_5)+"%")+` (${x.effettuate})`:"";})])})});
+
+  /* storico per treno */
+  disegnaTreni(ids[4], P.treni);
+}
+
+function disegnaTreni(box, treni){
+  let ordine = "programmate", verso = -1, minimo = 3, cerca = "", mostra = 25;
+  const sec = el("section",{class:"card",id:"g-treni"});
+  const corpo = el("div",{class:"tabella"});
+  const mpiu = el("button",{type:"button",class:"link"});
+  const info = el("p",{class:"sottotitolo"});
+  const campi = [
+    ["numero","Treno",false,t=>t.numero],["controparte","Tratta",false,t=>t.direzione==="partenza"?"→ "+(t.controparte||"?"):(t.controparte||"?")+" →"],
+    ["orario","Orario",false,t=>t.orario],["programmate","Corse",true,t=>f0(t.programmate)],["ritardo_medio","Ritardo medio (′)",true,t=>f1(t.ritardo_medio)],
+    ["pct_ritardi_5","% ≥5'",true,t=>fp(t.pct_ritardi_5)],["n_ritardi_15","Ritardi ≥15'",true,t=>f0(t.n_ritardi_15)],["pct_ritardi_15","% ≥15'",true,t=>fp(t.pct_ritardi_15)],
+    ["soppresse","Soppressioni",true,t=>f0(t.soppresse)],["pct_soppresse","% soppresse",true,t=>fp(t.pct_soppresse)]];
+  function ridisegna(){
+    const q = cerca.trim().toUpperCase();
+    let rs = treni.filter(t=>t.programmate>=minimo && (!q || (t.numero+" "+(t.controparte||"")+" "+t.direttrice).toUpperCase().includes(q)));
+    rs.sort((a,b)=>{ const x=a[ordine], y=b[ordine]; if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1;
+      return (typeof x==="string"? x.localeCompare(y,"it",{numeric:true}) : x-y)*verso; });
+    info.textContent = `${rs.length} treni${rs.length!==treni.length?` (su ${treni.length})`:""}. Clicca sulle intestazioni per ordinare.`;
+    corpo.replaceChildren(el("table",null,
+      el("thead",null,el("tr",null,campi.map(([k,t,num])=>el("th",{class:"ord"+(num?" n":""),text:t+(ordine===k?(verso>0?" ▲":" ▼"):""),tabindex:"0",
+        onclick:()=>{ if(ordine===k) verso=-verso; else {ordine=k;verso=num?-1:1;} ridisegna(); },
+        onkeydown:e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();e.target.click();} }})))),
+      el("tbody",null,rs.slice(0,mostra).map(t=>el("tr",null,campi.map(([k,,num,f])=>el("td",{class:num?"n":"",text:f(t)})))))));
+    mpiu.classList.toggle("hidden", rs.length<=mostra);
+    mpiu.textContent = `Mostra altri 25 (${rs.length-mostra} nascosti)`;
+  }
+  mpiu.onclick = ()=>{mostra+=25;ridisegna();};
+  const ctrl = el("div",{class:"ctrl"},
+    el("input",{type:"search",placeholder:"Cerca numero o tratta…","aria-label":"Cerca treno",oninput:e=>{cerca=e.target.value;mostra=25;ridisegna();}}),
+    el("label",null,"Almeno ",el("select",{"aria-label":"Corse minime",onchange:e=>{minimo=+e.target.value;mostra=25;ridisegna();}},
+      [1,3,5,10,20].map(n=>el("option",{value:n,text:n+" corse",selected:n===minimo?true:null})))));
+  sec.append(el("h3",{text:"Ritardi e soppressioni di ciascun treno"}),
+    el("p",{class:"sottotitolo",text:"Un treno è identificato da numero e direzione. A metà dicembre, col cambio d'orario, molti numeri cambiano: lo storico si interrompe."}),
+    ctrl,info,corpo,mpiu,
+    el("p",{class:"fonte"},el("b",{text:"Fonte: "}),"ViaggiaTreno, elaborazione propria. Ritardo medio: i treni in anticipo contano come puntuali. Percentuali dei ritardi su corse effettuate, delle soppressioni su corse programmate."));
+  box.append(sec);
+  ridisegna();
+}
+
+function disegnaDati(){
+  const box = document.getElementById("dati-box");
+  const files = D.file_giornalieri||[];
+  box.append(el("p",null,"Tutti i dati raccolti sono liberamente scaricabili in formato CSV, per rielaborarli:"),
+    el("ul",{class:"dl"},
+      el("li",null,el("a",{href:"dati/corse_complete.csv",text:"corse_complete.csv"})," — tutte le corse registrate, una riga per treno e direzione"),
+      el("li",null,el("a",{href:"dati/riepilogo.json",text:"riepilogo.json"})," — gli indicatori calcolati, usati da questa pagina")),
+    files.length ? el("details",null,el("summary",{text:"File giornalieri (ultimi "+files.length+" giorni)"}),
+      el("div",{class:"files"},files.slice().reverse().map(d=>el("div",null,el("a",{href:`dati/corse/${d}.csv`,text:d+".csv"}))))) : null,
+    el("p",{class:"fonte"},el("b",{text:"Colonne principali: "}),"data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, nd = dato non disponibile); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); fermate_soppresse; motivo_ritardo. Citare: «elaborazione di Luca Bonzanni su dati ViaggiaTreno»."));
+}
+
+function disegnaMetodologia(){
+  const nc = D.controparti_non_classificate||[];
+  const voci = [
+    ["Fonte","i dati arrivano dal sistema pubblico ViaggiaTreno (RFI/Trenitalia), che raccoglie anche i treni regionali Trenord. Non è un'API ufficialmente documentata: può cambiare o interrompersi senza preavviso."],
+    ["Cosa misuriamo","per ogni treno in partenza o in arrivo a Bergamo, la differenza tra l'orario programmato e quello reale registrato nella stazione di Bergamo. Per le partenze conta l'orario di partenza, per gli arrivi l'orario di arrivo."],
+    ["Ritardo e puntualità","contiamo i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Sono soglie di lettura giornalistica: non coincidono necessariamente con le definizioni di puntualità dei contratti di servizio. Un treno in anticipo conta come puntuale."],
+    ["Soppressioni","un treno è considerato soppresso se ViaggiaTreno lo segnala come cancellato o se la fermata di Bergamo è tra quelle soppresse. Le soppressioni parziali che non toccano Bergamo non sono conteggiate. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel CSV."],
+    ["Percentuali","i ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni sulle corse programmate (effettuate più soppresse). Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte."],
+    ["Copertura","la rilevazione è iniziata il "+(D.prima_data?dataLunga(D.prima_data):"–")+": non esiste uno storico precedente. Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione."],
+    ["Direttrici","la direttrice dipende dal capolinea (es. «MILANO» comprende Centrale e Porta Garibaldi). Le regole si modificano in config/direttrici.csv e si applicano a tutto lo storico."+(nc.length?" Capolinea non ancora assegnati: "+nc.slice(0,8).map(x=>x[0]+" ("+x[1]+")").join(", ")+".":"")],
+    ["Aggiornamento","la raccolta parte automaticamente circa ogni 15 minuti; i ritardi di GitHub nell'avvio delle procedure possono far slittare gli aggiornamenti. Ultimo aggiornamento dei dati: "+(D.aggiornato_il?new Date(D.aggiornato_il).toLocaleString("it-IT",{dateStyle:"long",timeStyle:"short"}):"–")+"."],
+    ["Interpretazione","le medie su pochi giorni risentono di singoli eventi (scioperi, guasti, lavori). Le tabelle indicano sempre il numero di corse su cui si basa ogni valore."],
+  ];
+  document.getElementById("metodologia-box").replaceChildren(...voci.map(([k,t])=>el("li",null,el("b",{text:k+". "}),t)));
+}
+
+function disegnaCondividi(){
+  const u = encodeURIComponent(location.href.split("#")[0]), t = encodeURIComponent(document.title);
+  const box = document.getElementById("share");
+  box.append("Condividi:",
+    el("a",{href:`https://www.linkedin.com/sharing/share-offsite/?url=${u}`,target:"_blank",rel:"noopener",text:"LinkedIn"}),
+    el("a",{href:`https://www.facebook.com/sharer/sharer.php?u=${u}`,target:"_blank",rel:"noopener",text:"Facebook"}),
+    el("a",{href:`https://twitter.com/intent/tweet?url=${u}&text=${t}`,target:"_blank",rel:"noopener",text:"X"}),
+    el("a",{href:`https://wa.me/?text=${t}%20${u}`,target:"_blank",rel:"noopener",text:"WhatsApp"}),
+    el("a",{href:`mailto:?subject=${t}&body=${u}`,text:"E-mail"}),
+    el("button",{type:"button",text:"Copia il link",onclick:e=>{ (navigator.clipboard?navigator.clipboard.writeText(location.href.split("#")[0]):Promise.reject()).then(()=>{e.target.textContent="Link copiato";}).catch(()=>{e.target.textContent="Copia non riuscita";}); }}));
+}
+
+function init(d){
+  D = d;
+  document.getElementById("agg").textContent = d.aggiornato_il
+    ? "Ultimo aggiornamento dei dati: " + new Date(d.aggiornato_il).toLocaleString("it-IT",{dateStyle:"long",timeStyle:"short"})
+    : "In attesa dei primi dati.";
+  disegnaCondividi(); disegnaOggi(); disegnaPeriodo(); disegnaDati(); disegnaMetodologia();
+}
+
+fetch("dati/riepilogo.json",{cache:"no-store"}).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }).then(init).catch(()=>{
+  document.getElementById("agg").textContent = "I dati non sono ancora disponibili: la prima raccolta non è ancora stata completata.";
+  disegnaCondividi();
+});
+</script>
+</body>
+</html>
