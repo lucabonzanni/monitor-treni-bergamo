@@ -34,6 +34,8 @@ OFFSET_TABELLE_MIN = (-30, 0, 45, 90, 135)  # a che ora "guardiamo" le tabelle, 
 ANTICIPO_DETTAGLIO_MIN = 10   # chiediamo il dettaglio dai 10 minuti prima dell'orario previsto
 SCADENZA_ORE = 6              # dopo 6 ore senza dati definitivi il treno diventa "nd"
 MAX_DETTAGLI = 80             # limite di richieste di dettaglio per esecuzione
+MAX_RICONTROLLI = 20          # limite di riletture di corse già effettuate (per cogliere soppressioni parziali tardive)
+RICONTROLLO_ORE = 2           # le corse effettuate vengono rilette per questo tempo dopo l'orario programmato
 MAX_PERCORSI = 25             # limite di richieste per completare il percorso ("via") dei treni da/per Milano
 PAUSA = float(os.environ.get("PAUSA_RICHIESTE", "0.4"))
 
@@ -41,10 +43,10 @@ CAMPI = [
     "id", "data", "direzione", "numero_treno", "controparte",
     "orario_programmato", "orario_reale", "ritardo_min", "stato",
     "provvedimento", "tipo_treno", "fermate_soppresse", "motivo_ritardo",
-    "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms", "via",
+    "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms", "via", "parziale",
 ]
 CAMPI_CONFRONTO = ["orario_reale", "ritardo_min", "stato", "provvedimento", "tipo_treno",
-                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via"]
+                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via", "parziale"]
 
 _base_ok = None
 
@@ -216,6 +218,32 @@ def bergamo_soppressa(lista):
     return STAZIONE in s or "BERGAMO" in s
 
 
+def _nome_fermata(x):
+    if isinstance(x, dict):
+        x = x.get("stazione") or x.get("nomeFermata") or x.get("descrizione") or ""
+    return str(x).strip().upper()
+
+
+def fermate_saltate(d):
+    """Nomi delle fermate (diverse da Bergamo) che la corsa non effettua: dall'elenco fermateSoppresse
+    e dalle fermate con actualFermataType = 3 (soppressa)."""
+    nomi = []
+    for x in d.get("fermateSoppresse") or []:
+        n = _nome_fermata(x)
+        if n:
+            nomi.append(n)
+    for f in d.get("fermate") or []:
+        if f.get("actualFermataType") == 3:
+            n = _nome_fermata(f)
+            if n:
+                nomi.append(n)
+    visti = []
+    for n in nomi:
+        if n not in visti and n != "BERGAMO" and STAZIONE not in n:
+            visti.append(n)
+    return visti
+
+
 def percorso(d):
     """Dalle fermate della corsa ricava il percorso: "Carnate", "Pioltello" oppure "-" se non riconosciuto.
     Restituisce "" se la corsa non riporta fermate."""
@@ -254,11 +282,15 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
         riga["via"] = via
     riga["provvedimento"] = "" if prov is None else str(prov)
     riga["tipo_treno"] = "" if tipo is None else str(tipo)
-    riga["fermate_soppresse"] = json.dumps(sopp_lista, ensure_ascii=False)[:200] if sopp_lista else ""
+    saltate = fermate_saltate(d)
+    riga["fermate_soppresse"] = "|".join(saltate)[:200]
     motivo = d.get("motivoRitardoPrevalente")
     riga["motivo_ritardo"] = str(motivo)[:80] if motivo else ""
 
     soppresso = (prov == 1 or str(prov) == "1" or tipo == "ST" or bergamo_soppressa(sopp_lista))
+    # soppressione parziale: la corsa passa da Bergamo ma salta altre fermate (es. termina prima della destinazione)
+    parziale = (not soppresso) and (bool(saltate) or prov == 2 or str(prov) == "2")
+    riga["parziale"] = "1" if parziale else ""
     if soppresso:
         riga["stato"] = "soppresso"
         riga["orario_reale"] = ""
@@ -327,9 +359,27 @@ def esegui(adesso=None):
                 riga["aggiornato_il"] = adesso_iso
                 aggiornati += 1
 
+    # --- 2a. riletture: una soppressione parziale (es. corsa che termina prima) può comparire dopo il passaggio da Bergamo
+    ricontrollati = 0
+    gia_letti = {r["id"] for r in candidati[:MAX_DETTAGLI]}
+    recenti = [
+        r for r in arch.tutte()
+        if r["definitivo"] == "1" and r["stato"] == "effettuato" and r["id"] not in gia_letti
+        and adesso_ms - RICONTROLLO_ORE * 3600000 <= int(r["ts_programmato"]) <= adesso_ms
+    ]
+    recenti.sort(key=lambda r: -int(r["ts_programmato"]))
+    for riga in recenti[:MAX_RICONTROLLI]:
+        d = json_da(f"andamentoTreno/{riga['cod_origine']}/{riga['numero_treno']}/{riga['data_corsa_ms']}")
+        time.sleep(PAUSA)
+        ricontrollati += 1
+        if isinstance(d, dict) and d:
+            if aggiorna_da_dettaglio(riga, d, adesso_ms):
+                riga["aggiornato_il"] = adesso_iso
+                aggiornati += 1
+
     # --- 2b. percorso (via Pioltello o via Carnate) dei treni da/per Milano che non lo hanno ancora
     percorsi = 0
-    gia = {r["id"] for r in candidati[:MAX_DETTAGLI]}
+    gia = gia_letti | {r["id"] for r in recenti[:MAX_RICONTROLLI]}
     for riga in sorted(arch.tutte(), key=lambda r: -int(r["ts_programmato"])):
         if percorsi >= MAX_PERCORSI:
             break
@@ -352,7 +402,7 @@ def esegui(adesso=None):
 
     file_modificati = arch.salva()
     print(f"Tabelle lette: {tabelle_ok}/{len(OFFSET_TABELLE_MIN) * 2} | treni visti: {viste} | nuovi: {nuovi} | "
-          f"dettagli richiesti: {richiesti} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "
+          f"dettagli richiesti: {richiesti} | riletture: {ricontrollati} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "
           f"file modificati: {file_modificati}")
     return 0
 

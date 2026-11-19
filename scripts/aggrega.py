@@ -81,6 +81,7 @@ def statistiche(rows):
     eff = [r for r in rows if r["stato"] == "effettuato" and r["_rit"] is not None]
     sopp = [r for r in rows if r["stato"] == "soppresso"]
     nd = [r for r in rows if r["stato"] == "nd"]
+    parz = [r for r in rows if r["stato"] == "effettuato" and r.get("parziale") == "1"]
     rit = [max(0, r["_rit"]) for r in eff]  # un treno in anticipo conta come puntuale
     prog = len(eff) + len(sopp)
     n5 = sum(1 for x in rit if x >= SOGLIA)
@@ -89,6 +90,7 @@ def statistiche(rows):
         "programmate": prog,
         "effettuate": len(eff),
         "soppresse": len(sopp),
+        "sopp_parziali": len(parz),
         "nd": len(nd),
         "ritardo_medio": round(statistics.mean(rit), 1) if rit else None,
         "ritardo_mediano": round(statistics.median(rit), 1) if rit else None,
@@ -98,6 +100,7 @@ def statistiche(rows):
         "n_ritardi_15": n15,
         "pct_ritardi_15": pct(n15, len(eff)),
         "pct_soppresse": pct(len(sopp), prog),
+        "pct_sopp_parziali": pct(len(parz), prog),
     }
 
 
@@ -205,15 +208,23 @@ def main():
                "30": blocco(da(30), oggi, regole),
                "7": blocco(da(7), oggi, regole)}
 
-    lista_oggi = []
-    for r in righe:
-        if r["data"] == oggi:
-            lista_oggi.append({
-                "orario": r["orario_programmato"], "reale": r["orario_reale"],
-                "direzione": r["direzione"], "numero": r["numero_treno"],
-                "controparte": r["controparte"], "direttrice": direttrice(r["controparte"], regole, r.get("via")),
-                "stato": r["stato"], "ritardo": r["_rit"], "motivo": r["motivo_ritardo"],
-            })
+    def elenco(giorno):
+        out = []
+        for r in righe:
+            if r["data"] == giorno:
+                out.append({
+                    "orario": r["orario_programmato"], "reale": r["orario_reale"],
+                    "direzione": r["direzione"], "numero": r["numero_treno"],
+                    "controparte": r["controparte"], "direttrice": direttrice(r["controparte"], regole, r.get("via")),
+                    "stato": r["stato"], "ritardo": r["_rit"], "motivo": r["motivo_ritardo"],
+                    "parziale": r.get("parziale") == "1",
+                    "saltate": [x for x in (r.get("fermate_soppresse") or "").split("|") if x and not x.startswith("[")],
+                })
+        return out
+
+    ieri = (oggi_d - timedelta(days=1)).isoformat()
+    lista_oggi = elenco(oggi)
+    lista_ieri = elenco(ieri)
 
     non_classificate = Counter(r["controparte"] for r in righe
                                if r["controparte"] and direttrice(r["controparte"], regole, r.get("via")) == ALTRE)
@@ -228,6 +239,8 @@ def main():
         "soglie": {"ritardo": SOGLIA, "ritardo_grave": GRAVE},
         "periodi": periodi,
         "oggi_elenco": lista_oggi,
+        "ieri": ieri,
+        "ieri_elenco": lista_ieri,
         "controparti_non_classificate": non_classificate.most_common(30),
         "file_giornalieri": date_con_dati[-30:],
         "totale_righe": len(righe),
