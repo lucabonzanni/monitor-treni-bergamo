@@ -1,0 +1,513 @@
+"use strict";
+/* ---------- utilità ---------- */
+function el(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v === false || v == null) continue;
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+}
+const NS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, ...kids) {
+  const e = document.createElementNS(NS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v);
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+}
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const FONT = '"Rethink Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const nf1 = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf0 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
+const f1 = v => v == null ? "n.d." : nf1.format(v);
+const f0 = v => v == null ? "n.d." : nf0.format(v);
+const fp = v => v == null ? "n.d." : nf1.format(v) + "%";
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const dm = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+const dmy = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4);
+const dataLunga = iso => cap(new Date(iso + "T12:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+const nomeStaz = s => (s || "?").toLowerCase().replace(/(^|[\s'’.\-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+const DIREZ = { partenza: "Partenza", arrivo: "Arrivo", tutte: "Tutte" };
+const NOMI_CORTI = { "Lunedì": "Lun", "Martedì": "Mar", "Mercoledì": "Mer", "Giovedì": "Gio", "Venerdì": "Ven", "Sabato": "Sab", "Domenica": "Dom" };
+const piccolo = () => window.innerWidth < 600;
+const quando = iso => new Date(iso).toLocaleString("it-IT", { dateStyle: "long", timeStyle: "short" });
+
+/* ---------- etichetta per la mappa di calore ---------- */
+const tip = el("div", { class: "tip", role: "tooltip" });
+document.body.append(tip);
+function showTip(x, y, titolo, righe) {
+  tip.replaceChildren(el("div", { class: "tip-t", text: titolo }),
+    ...righe.map(r => el("div", { class: "tip-r" }, el("strong", { text: r.valore }), el("span", { class: "nome", text: r.nome }))));
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let px = x + 14, py = y + 14;
+  if (px + w > innerWidth - 8) px = x - w - 14;
+  if (py + h > innerHeight - 8) py = y - h - 14;
+  tip.style.left = Math.max(8, px) + "px"; tip.style.top = Math.max(8, py) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+/* ---------- grafici (Chart.js) ---------- */
+const charts = new Map();
+const crosshair = {
+  id: "crosshair",
+  afterDatasetsDraw(chart, args, opts) {
+    if (!opts || !opts.on) return;
+    const a = chart.tooltip && chart.tooltip.getActiveElements ? chart.tooltip.getActiveElements() : [];
+    if (!a.length) return;
+    const x = a[0].element.x, ca = chart.chartArea, ctx = chart.ctx;
+    ctx.save(); ctx.strokeStyle = css("--muted"); ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(x, ca.top); ctx.lineTo(x, ca.bottom); ctx.stroke(); ctx.restore();
+  }
+};
+Chart.register(crosshair);
+Chart.defaults.font.family = FONT;
+
+function tooltipBase(extra) {
+  return Object.assign({
+    backgroundColor: css("--card"), titleColor: css("--ink"), bodyColor: css("--ink2"),
+    borderColor: css("--border"), borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true
+  }, extra || {});
+}
+function scalaValori(extra) {
+  const s = {
+    beginAtZero: true, suggestedMax: 5,
+    grid: { color: css("--grid"), lineWidth: 1, borderDash: [1, 4], drawTicks: false }, border: { display: false },
+    ticks: { color: css("--muted"), padding: 8, callback: v => nf0.format(v) + "%" }
+  };
+  return Object.assign(s, extra || {});
+}
+function scalaCategorie(extra) {
+  return Object.assign({
+    grid: { display: false }, border: { color: css("--grid") },
+    ticks: { color: css("--muted"), maxRotation: 0, autoSkip: false, font: { size: piccolo() ? 11 : 12 } }
+  }, extra || {});
+}
+function disegnaGrafico(id, plot, cfg, aria) {
+  const old = charts.get(id); if (old) old.destroy();
+  plot.replaceChildren();
+  const cv = el("canvas", { role: "img", "aria-label": aria || "" });
+  plot.append(cv);
+  charts.set(id, new Chart(cv, cfg));
+}
+const messaggio = (plot, testo) => plot.replaceChildren(el("div", { class: "msg", text: testo }));
+
+const LEG = [
+  { nome: "Ritardi di almeno 5'", campo: "pct_ritardi_5", n: "n_ritardi_5", base: "effettuate", css: "--c1" },
+  { nome: "Ritardi di almeno 15'", campo: "pct_ritardi_15", n: "n_ritardi_15", base: "effettuate", css: "--c2" },
+  { nome: "Soppressioni", campo: "pct_soppresse", n: "soppresse", base: "programmate", css: "--c3" }
+];
+const colori = () => LEG.map(l => css(l.css));
+const testoValore = (s, l) => fp(s[l.campo]) + (s[l.base] ? " (" + s[l.n] + "/" + s[l.base] + ")" : "");
+
+function lineaAndamento(plot, gg) {
+  if (gg.length < 2) { messaggio(plot, "Servono almeno due giorni di dati per disegnare l'andamento."); return; }
+  const cols = colori(), cardC = css("--card");
+  const ds = LEG.map((l, i) => ({
+    label: l.nome, data: gg.map(g => g[l.campo]), borderColor: cols[i], backgroundColor: cols[i], borderWidth: 2, tension: 0, spanGaps: false,
+    pointRadius: gg.length <= 45 ? 4 : 0, pointHoverRadius: 6, pointHitRadius: 14, pointBorderWidth: 2,
+    pointBackgroundColor: gg.map(g => g.parziale ? cardC : cols[i]), pointBorderColor: cols[i]
+  }));
+  disegnaGrafico("andamento", plot, {
+    type: "line", data: { labels: gg.map(g => dm(g.data)), datasets: ds },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { right: 8, top: 6 } },
+      interaction: { mode: "index", axis: "x", intersect: false },
+      plugins: {
+        legend: { display: false }, crosshair: { on: true },
+        tooltip: tooltipBase({
+          callbacks: {
+            title: items => items.length ? dataLunga(gg[items[0].dataIndex].data) + (gg[items[0].dataIndex].parziale ? " (in corso)" : "") : "",
+            label: it => " " + it.dataset.label + ": " + testoValore(gg[it.dataIndex], LEG[it.datasetIndex])
+          }
+        })
+      },
+      scales: { x: scalaCategorie({ ticks: { color: css("--muted"), maxRotation: 0, autoSkip: true, maxTicksLimit: piccolo() ? 5 : 10 } }), y: scalaValori() }
+    }
+  }, "Andamento giornaliero di ritardi e soppressioni");
+}
+
+function barreVerticali(plot, cats, righe, extra) {
+  const cols = colori();
+  const ds = LEG.map((l, i) => ({
+    label: l.nome, data: righe.map(r => r[l.campo]), backgroundColor: cols[i], borderColor: cols[i], borderWidth: 0,
+    borderRadius: 3, borderSkipped: "bottom", maxBarThickness: 22
+  }));
+  disegnaGrafico("giorni", plot, {
+    type: "bar", data: { labels: cats, datasets: ds },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { right: 8, top: 6 } },
+      interaction: { mode: "index", intersect: false },
+      datasets: { bar: { categoryPercentage: 0.8, barPercentage: 0.9 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: tooltipBase({
+          callbacks: {
+            title: items => items.length ? righe[items[0].dataIndex].nome : "",
+            label: it => " " + it.dataset.label + ": " + fp(it.parsed.y),
+            afterBody: items => items.length ? [extra(righe[items[0].dataIndex])] : []
+          }
+        })
+      },
+      scales: { x: scalaCategorie(), y: scalaValori() }
+    }
+  }, "Disservizi per giorno della settimana");
+}
+
+function barreOrizzontali(plot, righe) {
+  const cols = colori();
+  plot.style.height = Math.max(180, righe.length * 62 + 54) + "px";
+  const ds = LEG.map((l, i) => ({
+    label: l.nome, data: righe.map(r => r[l.campo]), backgroundColor: cols[i], borderColor: cols[i], borderWidth: 0,
+    borderRadius: 4, borderSkipped: "start", maxBarThickness: 14
+  }));
+  disegnaGrafico("direttrici", plot, {
+    type: "bar", data: { labels: righe.map(r => r.direttrice), datasets: ds },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { right: 8, top: 4 } },
+      interaction: { mode: "index", axis: "y", intersect: false },
+      datasets: { bar: { categoryPercentage: 0.8, barPercentage: 0.9 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: tooltipBase({
+          callbacks: {
+            title: items => items.length ? righe[items[0].dataIndex].direttrice : "",
+            label: it => " " + it.dataset.label + ": " + fp(it.parsed.x),
+            afterBody: items => items.length ? [f0(righe[items[0].dataIndex].programmate) + " corse programmate"] : []
+          }
+        })
+      },
+      scales: {
+        x: scalaValori({ position: "top" }),
+        y: { grid: { display: false }, border: { color: css("--grid") }, ticks: { color: css("--ink2"), autoSkip: false, font: { size: piccolo() ? 11 : 12.5 } } }
+      }
+    }
+  }, "Disservizi per direttrice");
+}
+
+/* ---------- mappa di calore giorno e ora ---------- */
+function mappaCalore(plot, o) {
+  plot.replaceChildren();
+  const ore = o.ore, W = Math.max(300, plot.clientWidth || 640), L = 38, R = 6, T = 6, B = 26, rh = 30, H = T + B + rh * 7;
+  const cw = (W - L - R) / ore.length;
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "", style: "display:block;width:100%;height:auto" });
+  const vmax = Math.max(10, ...o.celle.filter(x => x.effettuate >= o.minimo).map(x => x.pct_ritardi_5 || 0));
+  const mappa = new Map(o.celle.map(x => [x.dow + "-" + x.ora, x]));
+  o.giorni.forEach((nome, i) => svg.append(sv("text", { x: L - 6, y: T + i * rh + rh / 2 + 4, "text-anchor": "end", class: "cat" }, NOMI_CORTI[nome] || nome)));
+  ore.forEach((h, j) => { if (cw >= 26 || j % 2 === 0) svg.append(sv("text", { x: L + j * cw + cw / 2, y: H - B + 16, "text-anchor": "middle" }, String(h))); });
+  o.giorni.forEach((nome, i) => ore.forEach((h, j) => {
+    const cella = mappa.get(i + "-" + h), x = L + j * cw, y = T + i * rh;
+    const ok = cella && cella.effettuate >= o.minimo;
+    const v = ok ? (cella.pct_ritardi_5 || 0) : null;
+    const r = sv("rect", {
+      x: x + 1, y: y + 1, width: Math.max(1, cw - 2), height: rh - 2, rx: 4,
+      style: ok ? `fill:var(--c1);fill-opacity:${(0.07 + 0.93 * Math.min(1, v / vmax)).toFixed(3)}`
+        : (cella ? "fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3" : "fill:var(--grid);fill-opacity:.4")
+    });
+    if (cella) {
+      const mostra = ev => showTip(ev.clientX, ev.clientY, `${nome}, ${String(h).padStart(2, "0")}:00-${String(h).padStart(2, "0")}:59`, [
+        { valore: cella.pct_ritardi_5 == null ? "n.d." : f1(cella.pct_ritardi_5) + "%", nome: "ritardi di almeno 5'" },
+        { valore: f1(cella.ritardo_medio), nome: "minuti di ritardo medio" },
+        { valore: String(cella.effettuate), nome: "corse osservate" + (ok ? "" : " (poche: dato indicativo)") }]);
+      r.addEventListener("pointermove", mostra); r.addEventListener("pointerleave", hideTip);
+    }
+    svg.append(r);
+    if (ok && cw >= 30 && v >= 0) svg.append(sv("text", { x: x + cw / 2, y: y + rh / 2 + 4, "text-anchor": "middle", style: "pointer-events:none;font-size:11px;font-weight:600;fill:" + (v / vmax > 0.6 ? "#ffffff" : "var(--ink)") }, String(Math.round(v))));
+  }));
+  plot.append(svg);
+}
+
+/* ---------- scheda: titolo, controlli, legenda, grafico, tabella, fonte ---------- */
+function tabellaEl(t) {
+  return el("table", t.sx ? { class: "sx" } : null,
+    el("thead", null, el("tr", null, t.head.map((h, i) => el("th", { text: h })))),
+    el("tbody", null, t.rows.map(r => el("tr", null, r.map(v => el("td", { text: v }))))));
+}
+function scheda(box, o) {
+  const plot = el("div", { class: "plot" + (o.auto ? " auto" : "") });
+  const wrap = el("div", { class: "tablewrap", hidden: true });
+  const leg = o.legenda ? el("div", { class: "legend" }, LEG.map(l => el("span", null, el("span", { class: "sw", style: "background:var(" + l.css + ")" }), l.nome))) : null;
+  let tabellaVisibile = false;
+  const btn = el("button", { type: "button", class: "tbl-btn", "aria-expanded": "false", text: "Mostra come tabella" });
+  btn.addEventListener("click", () => {
+    tabellaVisibile = !tabellaVisibile;
+    plot.hidden = tabellaVisibile; wrap.hidden = !tabellaVisibile; if (leg) leg.hidden = tabellaVisibile;
+    btn.setAttribute("aria-expanded", String(tabellaVisibile));
+    btn.textContent = tabellaVisibile ? "Mostra come grafico" : "Mostra come tabella";
+    if (!tabellaVisibile) o.disegna(plot);
+  });
+  const card = el("article", { class: "card", id: o.id },
+    el("h3", { text: o.titolo }), o.desc ? el("p", { class: "desc", text: o.desc }) : null,
+    o.controlli || null, leg, plot, wrap, btn,
+    el("p", { class: "fonte" }, el("strong", { text: "Fonte: " }), o.fonte || "ViaggiaTreno (Rfi/Trenitalia), elaborazione propria."));
+  box.append(card);
+  const rifai = () => { if (!tabellaVisibile) o.disegna(plot); wrap.replaceChildren(tabellaEl(o.tabella())); };
+  rifai();
+  if (o.suResize && "ResizeObserver" in window) {
+    let w = plot.clientWidth;
+    new ResizeObserver(() => { if (plot.clientWidth !== w && !tabellaVisibile) { w = plot.clientWidth; o.disegna(plot); } }).observe(plot);
+  }
+  return { rifai };
+}
+
+/* ---------- stato dei treni di oggi ---------- */
+function statoTreno(r) {
+  if (r.stato === "soppresso") return { testo: "Soppresso", colore: "var(--c3)", ico: "✕" };
+  if (r.stato === "nd") return { testo: "Dato non disponibile", colore: "var(--muted)", ico: "?" };
+  if (r.stato === "effettuato") {
+    const x = r.ritardo == null ? 0 : r.ritardo;
+    if (x >= 15) return { testo: `Ritardo grave: ${x}'`, colore: "var(--c2)", ico: "!!" };
+    if (x >= 5) return { testo: `Ritardo: ${x}'`, colore: "var(--c1)", ico: "!" };
+    return { testo: x > 0 ? `Puntuale (+${x}')` : "Puntuale", colore: "var(--ok)", ico: "✓" };
+  }
+  if (r.stato === "in_corso") return { testo: "In corso o atteso", colore: "var(--muted)", ico: "" };
+  return { testo: "Programmato", colore: "var(--muted)", ico: "" };
+}
+const chipStato = s => el("span", { class: "stato" }, el("i", { style: "background:" + s.colore }), el("span", { class: "ico", text: s.ico }), s.testo);
+const tile = (l, big, d, cls) => el("div", { class: "kpi" + (cls ? " " + cls : "") }, el("div", { class: "label", text: l }), el("div", { class: "value", text: big }), el("div", { class: "note", text: d || " " }));
+
+/* ---------- sezioni ---------- */
+let D = null, periodo = "tutto";
+const PERIODI = [["tutto", "Da inizio rilevazione"], ["30", "Ultimi 30 giorni"], ["7", "Ultimi 7 giorni"]];
+
+function disegnaOggi() {
+  const box = document.getElementById("oggi-box"); box.replaceChildren();
+  const righe = D.oggi_elenco || [];
+  const sub = document.getElementById("oggi-sub");
+  sub.replaceChildren(el("strong", { text: dataLunga(D.oggi) + (righe.length ? "" : ": ancora nessun treno registrato.") }));
+  if (!righe.length) return;
+  const eff = righe.filter(r => r.stato === "effettuato"), rit5 = eff.filter(r => (r.ritardo || 0) >= 5).length,
+    rit15 = eff.filter(r => (r.ritardo || 0) >= 15).length, sop = righe.filter(r => r.stato === "soppresso").length;
+  const attesi = righe.filter(r => r.stato === "programmato" || r.stato === "in_corso").length;
+  const sulRilevati = n => eff.length ? fp(100 * n / eff.length) + " dei treni rilevati" : "";
+  box.append(el("section", { class: "kpis" },
+    tile("Treni rilevati", f0(eff.length), `${f0(attesi)} ancora attesi`),
+    tile("Con ritardo di almeno 5'", f0(rit5), sulRilevati(rit5), "c1"),
+    tile("Con ritardo di almeno 15'", f0(rit15), sulRilevati(rit15), "c2"),
+    tile("Soppressioni", f0(sop), `su ${f0(righe.length)} corse (${fp(100 * sop / righe.length)})`, "c3")));
+  let soloAnomalie = false;
+  const wrap = el("div", { class: "sc" });
+  const cb = el("input", { type: "checkbox", id: "solo-anom" });
+  cb.addEventListener("change", e => { soloAnomalie = e.target.checked; ridisegna(); });
+  function ridisegna() {
+    const rs = righe.filter(r => !soloAnomalie || r.stato === "soppresso" || (r.ritardo || 0) >= 5);
+    wrap.replaceChildren(el("table", { class: "sx" },
+      el("thead", null, el("tr", null, ["Orario", "Effettivo", "Direzione", "N. treno", "Tratta", "Stato"].map(h => el("th", { text: h })))),
+      el("tbody", null, rs.map(r => el("tr", null,
+        el("td", { text: r.orario }), el("td", { text: r.reale || "-" }), el("td", { text: DIREZ[r.direzione] }),
+        el("td", { text: r.numero }),
+        el("td", { text: r.direzione === "partenza" ? "Bergamo → " + nomeStaz(r.controparte) : nomeStaz(r.controparte) + " → Bergamo" }),
+        el("td", null, chipStato(statoTreno(r))))))));
+  }
+  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5' e soppressioni" })));
+  ridisegna(); box.append(wrap);
+  box.append(el("p", { class: "fonte" }, el("strong", { text: "Fonte: " }), "ViaggiaTreno. L'orario effettivo è quello registrato a Bergamo; per i treni non ancora passati il dato si completa nelle ore successive."));
+}
+
+function disegnaFiltri() {
+  const f = document.getElementById("filtri"); f.replaceChildren();
+  PERIODI.forEach(([k, t]) => f.append(el("button", { type: "button", "aria-pressed": String(periodo === k), text: t, onclick: () => { periodo = k; disegnaPeriodo(); } })));
+  const dp = document.getElementById("dati-periodo"); dp.replaceChildren();
+  if (D.prima_data) {
+    const n = D.giorni_con_dati;
+    dp.append(el("strong", { text: `Dati dal ${dmy(D.prima_data)} al ${dmy(D.ultima_data)} (${n} ${n === 1 ? "giorno" : "giorni"})` }));
+  }
+}
+
+function disegnaPeriodo() {
+  disegnaFiltri();
+  const P = D.periodi[periodo], T = P.totale;
+  const avviso = document.getElementById("avviso"); avviso.replaceChildren();
+  const kpi = document.getElementById("kpi"); kpi.replaceChildren();
+  const ids = ["c-andamento", "c-giorni", "c-direttrici", "c-orari", "c-treni"].map(i => document.getElementById(i));
+  ids.forEach(e => e.replaceChildren());
+  for (const [id, c] of charts) { c.destroy(); charts.delete(id); }
+  if (!T.programmate) {
+    avviso.append(el("div", { class: "alert", text: "La raccolta è appena partita: i primi indicatori compariranno quando ci saranno treni con ritardo definitivo registrato." }));
+    ids.forEach(e => e.append(el("p", { class: "lead", text: "Disponibile non appena la raccolta avrà registrato i primi treni." })));
+    return;
+  }
+  if (D.giorni_con_dati < 14)
+    avviso.append(el("div", { class: "alert", text: `Dati raccolti da ${D.giorni_con_dati} giorn${D.giorni_con_dati === 1 ? "o" : "i"}: i confronti per giorno della settimana, direttrice e singolo treno diventano significativi con qualche settimana di osservazioni. Passando il cursore sui grafici compare un'etichetta con il numero di corse su cui si basa ogni valore; le tabelle riportano gli stessi dati.` }));
+  kpi.append(
+    tile("Corse analizzate", f0(T.programmate), `${f0(T.effettuate)} effettuate, ${f0(T.soppresse)} soppresse`),
+    tile("Ritardi di almeno 5'", fp(T.pct_ritardi_5), `${f0(T.n_ritardi_5)} su ${f0(T.effettuate)} corse effettuate`, "c1"),
+    tile("Ritardi di almeno 15'", fp(T.pct_ritardi_15), `${f0(T.n_ritardi_15)} su ${f0(T.effettuate)} corse effettuate`, "c2"),
+    tile("Soppressioni", fp(T.pct_soppresse), `${f0(T.soppresse)} su ${f0(T.programmate)} corse programmate`, "c3"),
+    tile("Ritardo medio", T.ritardo_medio == null ? "n.d." : f1(T.ritardo_medio) + "′", `mediana ${f1(T.ritardo_mediano)}′, massimo ${f0(T.ritardo_max)}′`));
+
+  /* andamento giornaliero */
+  const gg = P.giorni;
+  scheda(ids[0], {
+    id: "g-andamento", titolo: "Percentuale di corse in ritardo e soppresse, per giorno", legenda: true,
+    desc: "Ogni punto è un giorno. Il punto vuoto è il giorno in corso, ancora incompleto. Ritardi: su corse effettuate. Soppressioni: su corse programmate.",
+    disegna: plot => lineaAndamento(plot, gg),
+    tabella: () => ({
+      head: ["Giorno", "Corse programmate", "Effettuate", "Soppresse", "Ritardi di almeno 5'", "% almeno 5'", "Ritardi di almeno 15'", "% almeno 15'", "Ritardo medio (′)"],
+      rows: gg.map(g => [dm(g.data) + (g.parziale ? " (in corso)" : ""), f0(g.programmate), f0(g.effettuate), f0(g.soppresse), f0(g.n_ritardi_5), fp(g.pct_ritardi_5), f0(g.n_ritardi_15), fp(g.pct_ritardi_15), f1(g.ritardo_medio)])
+    })
+  });
+
+  /* giorni della settimana */
+  const dw = P.giorno_settimana;
+  scheda(ids[1], {
+    id: "g-giorni", titolo: "Disservizi per giorno della settimana", legenda: true,
+    desc: "Giorni completi (il giorno in corso è escluso). Il numero di giorni osservati compare nell'etichetta: con pochi giorni conta il singolo episodio.",
+    disegna: plot => barreVerticali(plot, dw.map(d => piccolo() ? NOMI_CORTI[d.nome] : d.nome), dw, d => `${d.giorni_osservati} giorni osservati, ${f0(d.programmate)} corse`),
+    tabella: () => ({
+      head: ["Giorno", "Giorni osservati", "Corse programmate", "% ritardi di almeno 5'", "% ritardi di almeno 15'", "% soppresse", "Ritardo medio (′)"],
+      rows: dw.map(d => [d.nome, f0(d.giorni_osservati), f0(d.programmate), fp(d.pct_ritardi_5), fp(d.pct_ritardi_15), fp(d.pct_soppresse), f1(d.ritardo_medio)])
+    })
+  });
+
+  /* direttrici */
+  const tutte = P.direttrici.filter(d => d.direzione === "tutte" && d.programmate > 0).sort((a, b) => b.programmate - a.programmate);
+  const ordine = tutte.map(d => d.direttrice);
+  let dirSel = "tutte";
+  const righeDir = () => ordine.map(n => P.direttrici.find(d => d.direttrice === n && d.direzione === dirSel)).filter(d => d && d.programmate > 0);
+  const drDir = P.direttrici.filter(d => d.programmate > 0).sort((a, b) => ordine.indexOf(a.direttrice) - ordine.indexOf(b.direttrice));
+  const seg = el("div", { class: "seg", role: "group", "aria-label": "Direzione" });
+  let scDir;
+  [["tutte", "Partenze e arrivi"], ["partenza", "Solo partenze"], ["arrivo", "Solo arrivi"]].forEach(([k, t]) => {
+    const b = el("button", { type: "button", "aria-pressed": String(k === dirSel), text: t });
+    b.addEventListener("click", () => { dirSel = k; [...seg.children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); scDir.rifai(); });
+    seg.append(b);
+  });
+  scDir = scheda(ids[2], {
+    id: "g-direttrici", titolo: "Disservizi per direttrice", legenda: true, controlli: el("div", { class: "controls" }, seg),
+    desc: "Raggruppate per capolinea; per Milano si distingue il percorso (via Pioltello o via Carnate). Le direttrici si definiscono nel file config/direttrici.csv.",
+    disegna: plot => { const r = righeDir(); r.length ? barreOrizzontali(plot, r) : messaggio(plot, "Nessuna corsa per questa selezione."); },
+    tabella: () => ({
+      sx: false,
+      head: ["Direttrice", "Direzione", "Corse programmate", "Effettuate", "Soppresse", "% ritardi di almeno 5'", "% ritardi di almeno 15'", "% soppresse", "Ritardo medio (′)"],
+      rows: drDir.map(d => [d.direttrice, DIREZ[d.direzione], f0(d.programmate), f0(d.effettuate), f0(d.soppresse), fp(d.pct_ritardi_5), fp(d.pct_ritardi_15), fp(d.pct_soppresse), f1(d.ritardo_medio)])
+    })
+  });
+
+  /* fasce orarie: mappa di calore */
+  const hm = P.heatmap;
+  const ore = [...new Set(P.fasce_orarie.map(f => f.ora))].sort((a, b) => a - b);
+  const orePiene = ore.length ? Array.from({ length: ore[ore.length - 1] - ore[0] + 1 }, (_, i) => ore[0] + i) : [];
+  const nomiGiorni = P.giorno_settimana.map(d => d.nome);
+  scheda(ids[3], {
+    id: "g-orari", titolo: "Ritardi di almeno 5' per giorno e ora", auto: true, suResize: true,
+    desc: "Quanto pesano i ritardi nelle diverse ore della giornata, giorno per giorno. L'ora è quella dell'orario programmato. Colore più intenso: più ritardi di almeno 5'. Riquadri tratteggiati: meno di 3 corse, dato non affidabile.",
+    fonte: "ViaggiaTreno (Rfi/Trenitalia), elaborazione propria. Giorni completi.",
+    disegna: plot => orePiene.length ? mappaCalore(plot, { aria: "Mappa di calore dei ritardi per giorno e ora", ore: orePiene, giorni: nomiGiorni, celle: hm, minimo: 3 }) : messaggio(plot, "Dati non ancora sufficienti."),
+    tabella: () => ({
+      head: ["Giorno", ...orePiene.map(h => String(h))],
+      rows: nomiGiorni.map((n, i) => [n, ...orePiene.map(h => { const x = hm.find(z => z.dow === i && z.ora === h); return x ? (x.pct_ritardi_5 == null ? "-" : f0(x.pct_ritardi_5) + "%") + ` (${x.effettuate})` : ""; })])
+    })
+  });
+
+  disegnaTreni(ids[4], P.treni);
+}
+
+function disegnaTreni(box, treni) {
+  let ordine = "programmate", verso = -1, minimo = 3, cerca = "", mostra = 25;
+  const sec = el("article", { class: "card", id: "g-treni" });
+  const corpo = el("div", { class: "tablewrap", style: "max-height:none" });
+  const mpiu = el("button", { type: "button", class: "link" });
+  const info = el("p", { class: "desc" });
+  const campi = [
+    ["numero", "N. treno", false, t => t.numero],
+    ["controparte", "Tratta", false, t => t.direzione === "partenza" ? "Bergamo → " + nomeStaz(t.controparte) : nomeStaz(t.controparte) + " → Bergamo"],
+    ["direttrice", "Direttrice", false, t => t.direttrice],
+    ["orario", "Orario", false, t => t.orario], ["programmate", "Corse", true, t => f0(t.programmate)], ["ritardo_medio", "Ritardo medio (′)", true, t => f1(t.ritardo_medio)],
+    ["pct_ritardi_5", "% ritardi di almeno 5'", true, t => fp(t.pct_ritardi_5)], ["n_ritardi_15", "Ritardi di almeno 15'", true, t => f0(t.n_ritardi_15)],
+    ["pct_ritardi_15", "% ritardi di almeno 15'", true, t => fp(t.pct_ritardi_15)], ["soppresse", "Soppressioni", true, t => f0(t.soppresse)], ["pct_soppresse", "% soppresse", true, t => fp(t.pct_soppresse)]];
+  function ridisegna() {
+    const q = cerca.trim().toUpperCase();
+    const rs = treni.filter(t => t.programmate >= minimo && (!q || (t.numero + " " + (t.controparte || "") + " " + t.direttrice).toUpperCase().includes(q)));
+    rs.sort((a, b) => {
+      const x = a[ordine], y = b[ordine]; if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+      return (typeof x === "string" ? x.localeCompare(y, "it", { numeric: true }) : x - y) * verso;
+    });
+    info.textContent = `${rs.length} treni${rs.length !== treni.length ? ` (su ${treni.length})` : ""}. Clicca sulle intestazioni per ordinare.`;
+    corpo.replaceChildren(el("table", null,
+      el("thead", null, el("tr", null, campi.map(([k, t, num]) => {
+        const th = el("th", { class: "ord", text: t + (ordine === k ? (verso > 0 ? " ▲" : " ▼") : ""), tabindex: "0", style: num ? "" : "text-align:left" });
+        th.addEventListener("click", () => { if (ordine === k) verso = -verso; else { ordine = k; verso = num ? -1 : 1; } ridisegna(); });
+        th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); th.click(); } });
+        return th;
+      }))),
+      el("tbody", null, rs.slice(0, mostra).map(t => el("tr", null, campi.map(([k, , num, f]) => el("td", { text: f(t), style: num ? "" : "text-align:left" })))))));
+    mpiu.classList.toggle("hidden", rs.length <= mostra);
+    mpiu.textContent = `Mostra altri 25 (${rs.length - mostra} nascosti)`;
+  }
+  mpiu.addEventListener("click", () => { mostra += 25; ridisegna(); });
+  const ricerca = el("input", { type: "search", placeholder: "Cerca numero o tratta…", "aria-label": "Cerca treno" });
+  ricerca.addEventListener("input", e => { cerca = e.target.value; mostra = 25; ridisegna(); });
+  const sel = el("select", { "aria-label": "Corse minime" }, [1, 3, 5, 10, 20].map(n => el("option", { value: n, text: n + " corse", selected: n === minimo ? true : null })));
+  sel.addEventListener("change", e => { minimo = +e.target.value; mostra = 25; ridisegna(); });
+  sec.append(el("h3", { text: "Ritardi e soppressioni di ciascun treno" }),
+    el("p", { class: "desc", text: "Un treno è identificato da numero e direzione. A metà dicembre, con il cambio d'orario, molti numeri cambiano: lo storico si interrompe." }),
+    el("div", { class: "controls" }, ricerca, el("label", null, "Almeno ", sel)), info, corpo, mpiu,
+    el("p", { class: "fonte" }, el("strong", { text: "Fonte: " }), "ViaggiaTreno (Rfi/Trenitalia), elaborazione propria. Ritardo medio: i treni in anticipo contano come puntuali. Percentuali dei ritardi su corse effettuate, delle soppressioni su corse programmate."));
+  box.append(sec);
+  ridisegna();
+}
+
+function disegnaDati() {
+  const box = document.getElementById("dati-box"); box.replaceChildren();
+  const files = D.file_giornalieri || [];
+  box.append(el("p", { class: "lead", text: "Tutti i dati raccolti sono liberamente scaricabili in formato .csv, per rielaborarli." }),
+    el("ul", { class: "dl" },
+      el("li", null, el("a", { href: "dati/corse_complete.csv", text: "corse_complete.csv" }), ": tutte le corse registrate, una riga per treno e direzione."),
+      el("li", null, el("a", { href: "dati/riepilogo.json", text: "riepilogo.json" }), ": gli indicatori calcolati, usati da questa pagina.")),
+    files.length ? el("details", null, el("summary", { text: "File giornalieri (ultimi " + files.length + " giorni)" }),
+      el("div", { class: "files" }, files.slice().reverse().map(d => el("div", null, el("a", { href: `dati/corse/${d}.csv`, text: d + ".csv" }))))) : null,
+    el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); fermate_soppresse; motivo_ritardo. Citare: «elaborazione di Luca Bonzanni su dati ViaggiaTreno»."));
+}
+
+function disegnaMetodologia() {
+  const nc = D.controparti_non_classificate || [];
+  const voci = [
+    ["Fonte", "I dati arrivano dal sistema pubblico ViaggiaTreno (Rfi/Trenitalia), che raccoglie anche i treni regionali Trenord. Non è un'API ufficialmente documentata: può cambiare o interrompersi senza preavviso."],
+    ["Cosa misuriamo", "Per ogni treno in partenza o in arrivo a Bergamo, la differenza tra l'orario programmato e quello effettivo registrato nella stazione di Bergamo. Per le partenze conta l'orario di partenza, per gli arrivi l'orario di arrivo."],
+    ["Ritardo e puntualità", "Contiamo i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Sono soglie di lettura giornalistica: non coincidono necessariamente con le definizioni di puntualità dei contratti di servizio. Un treno in anticipo conta come puntuale."],
+    ["Soppressioni", "Un treno è considerato soppresso se ViaggiaTreno lo segnala come cancellato o se la fermata di Bergamo è tra quelle soppresse. Le soppressioni parziali che non toccano Bergamo non sono conteggiate. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
+    ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni sulle corse programmate (effettuate più soppresse). Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte."],
+    ["Copertura", "La rilevazione è iniziata il " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + ": non esiste uno storico precedente. Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione."],
+    ["Direttrici", "La direttrice dipende dal capolinea (per esempio «Milano» comprende Centrale e Porta Garibaldi). Per i treni da e per Milano si distingue il percorso, via Pioltello o via Carnate, in base alle fermate intermedie registrate da ViaggiaTreno. Le regole si modificano in config/direttrici.csv e si applicano a tutto lo storico." + (nc.length ? " Capolinea non ancora assegnati: " + nc.slice(0, 8).map(x => nomeStaz(x[0]) + " (" + x[1] + ")").join(", ") + "." : "")],
+    ["Aggiornamento", "La raccolta parte automaticamente circa ogni 15 minuti; gli avvii possono subire ritardi, quindi i dati più recenti possono arrivare con qualche minuto di scarto. Ultimo aggiornamento dei dati: " + (D.aggiornato_il ? quando(D.aggiornato_il) : "-") + "."],
+    ["Interpretazione", "Le medie su pochi giorni risentono di singoli eventi (scioperi, guasti, lavori). Le tabelle indicano sempre il numero di corse su cui si basa ogni valore."]
+  ];
+  document.getElementById("metodologia-box").replaceChildren(...voci.map(([k, t]) => el("li", null, el("b", { text: k + ". " }), t)));
+}
+
+function disegnaCondividi() {
+  const u = encodeURIComponent(location.href.split("#")[0]), t = encodeURIComponent(document.title);
+  const box = document.getElementById("share"); box.replaceChildren();
+  const lnk = (href, testo) => el("a", { href, target: "_blank", rel: "noopener", text: testo });
+  const copia = el("button", { type: "button", text: "Copia il link" });
+  copia.addEventListener("click", () => {
+    (navigator.clipboard ? navigator.clipboard.writeText(location.href.split("#")[0]) : Promise.reject())
+      .then(() => { copia.textContent = "Link copiato"; }).catch(() => { copia.textContent = "Copia non riuscita"; });
+  });
+  box.append(el("span", { class: "tb-l", text: "Condividi:" }),
+    lnk(`https://www.linkedin.com/sharing/share-offsite/?url=${u}`, "LinkedIn"),
+    lnk(`https://www.facebook.com/sharer/sharer.php?u=${u}`, "Facebook"),
+    lnk(`https://twitter.com/intent/tweet?url=${u}&text=${t}`, "X"),
+    lnk(`https://wa.me/?text=${t}%20${u}`, "WhatsApp"),
+    el("a", { href: `mailto:?subject=${t}&body=${u}`, text: "E-mail" }), copia);
+}
+
+function init(d) {
+  D = d;
+  document.getElementById("stamp").textContent = d.aggiornato_il ? "Ultimo aggiornamento dei dati: " + quando(d.aggiornato_il) : "In attesa dei primi dati.";
+  disegnaCondividi(); disegnaOggi(); disegnaPeriodo(); disegnaDati(); disegnaMetodologia();
+}
+if (window.matchMedia) {
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  const cambio = () => { if (D) disegnaPeriodo(); };
+  if (mq.addEventListener) mq.addEventListener("change", cambio); else if (mq.addListener) mq.addListener(cambio);
+}
+fetch("dati/riepilogo.json", { cache: "no-store" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(init).catch(() => {
+  document.getElementById("stamp").textContent = "I dati non sono ancora disponibili: la prima raccolta non è ancora stata completata.";
+  disegnaCondividi();
+});

@@ -34,16 +34,17 @@ OFFSET_TABELLE_MIN = (-30, 0, 45, 90, 135)  # a che ora "guardiamo" le tabelle, 
 ANTICIPO_DETTAGLIO_MIN = 10   # chiediamo il dettaglio dai 10 minuti prima dell'orario previsto
 SCADENZA_ORE = 6              # dopo 6 ore senza dati definitivi il treno diventa "nd"
 MAX_DETTAGLI = 80             # limite di richieste di dettaglio per esecuzione
+MAX_PERCORSI = 25             # limite di richieste per completare il percorso ("via") dei treni da/per Milano
 PAUSA = float(os.environ.get("PAUSA_RICHIESTE", "0.4"))
 
 CAMPI = [
     "id", "data", "direzione", "numero_treno", "controparte",
     "orario_programmato", "orario_reale", "ritardo_min", "stato",
     "provvedimento", "tipo_treno", "fermate_soppresse", "motivo_ritardo",
-    "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms",
+    "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms", "via",
 ]
 CAMPI_CONFRONTO = ["orario_reale", "ritardo_min", "stato", "provvedimento", "tipo_treno",
-                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte"]
+                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via"]
 
 _base_ok = None
 
@@ -191,7 +192,7 @@ def aggiungi_da_tabella(arch, item, direzione, adesso_iso):
         "ritardo_min": "", "stato": "programmato", "provvedimento": "", "tipo_treno": "",
         "fermate_soppresse": "", "motivo_ritardo": "", "definitivo": "0",
         "aggiornato_il": adesso_iso, "ts_programmato": str(ts),
-        "cod_origine": cod_origine, "data_corsa_ms": str(data_corsa),
+        "cod_origine": cod_origine, "data_corsa_ms": str(data_corsa), "via": "",
     }
     return True
 
@@ -215,6 +216,19 @@ def bergamo_soppressa(lista):
     return STAZIONE in s or "BERGAMO" in s
 
 
+def percorso(d):
+    """Dalle fermate della corsa ricava il percorso: "Carnate", "Pioltello" oppure "-" se non riconosciuto.
+    Restituisce "" se la corsa non riporta fermate."""
+    nomi = [str(f.get("stazione", "")).upper() for f in (d.get("fermate") or [])]
+    if not nomi:
+        return ""
+    if any("CARNATE" in n or "PADERNO" in n for n in nomi):
+        return "Carnate"
+    if any("PIOLTELLO" in n or "TREVIGLIO" in n for n in nomi):
+        return "Pioltello"
+    return "-"
+
+
 def aggiorna_da_dettaglio(riga, d, adesso_ms):
     """Aggiorna la riga con il dettaglio della corsa. Restituisce True se qualcosa è cambiato."""
     prima = {c: riga.get(c, "") for c in CAMPI_CONFRONTO}
@@ -235,6 +249,9 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
         rea = a_ms(f.get(k_rea))
         rit_ufficiale = f.get(k_rit)
 
+    via = percorso(d)
+    if via:
+        riga["via"] = via
     riga["provvedimento"] = "" if prov is None else str(prov)
     riga["tipo_treno"] = "" if tipo is None else str(tipo)
     riga["fermate_soppresse"] = json.dumps(sopp_lista, ensure_ascii=False)[:200] if sopp_lista else ""
@@ -310,6 +327,20 @@ def esegui(adesso=None):
                 riga["aggiornato_il"] = adesso_iso
                 aggiornati += 1
 
+    # --- 2b. percorso (via Pioltello o via Carnate) dei treni da/per Milano che non lo hanno ancora
+    percorsi = 0
+    gia = {r["id"] for r in candidati[:MAX_DETTAGLI]}
+    for riga in sorted(arch.tutte(), key=lambda r: -int(r["ts_programmato"])):
+        if percorsi >= MAX_PERCORSI:
+            break
+        if riga.get("via") or riga["id"] in gia or "MILANO" not in (riga.get("controparte") or "").upper():
+            continue
+        d = json_da(f"andamentoTreno/{riga['cod_origine']}/{riga['numero_treno']}/{riga['data_corsa_ms']}")
+        time.sleep(PAUSA)
+        percorsi += 1
+        if isinstance(d, dict) and d:
+            riga["via"] = percorso(d) or "-"
+
     # --- 3. scadenza: dopo 6 ore senza dati il treno resta "nd" (non disponibile)
     scaduti = 0
     for riga in arch.tutte():
@@ -321,7 +352,7 @@ def esegui(adesso=None):
 
     file_modificati = arch.salva()
     print(f"Tabelle lette: {tabelle_ok}/{len(OFFSET_TABELLE_MIN) * 2} | treni visti: {viste} | nuovi: {nuovi} | "
-          f"dettagli richiesti: {richiesti} | aggiornati: {aggiornati} | scaduti (nd): {scaduti} | "
+          f"dettagli richiesti: {richiesti} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "
           f"file modificati: {file_modificati}")
     return 0
 

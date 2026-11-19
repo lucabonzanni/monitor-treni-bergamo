@@ -37,15 +37,18 @@ def leggi_regole():
             for r in csv.DictReader(f):
                 kw = (r.get("parola_chiave") or "").strip().upper()
                 nome = (r.get("direttrice") or "").strip()
+                # terza colonna facoltativa: percorso richiesto (es. Carnate); vuota = qualsiasi
+                vie = [v.strip().upper() for v in (r.get("via") or "").split("|") if v.strip()]
                 if kw and nome:
-                    regole.append((kw, nome))
+                    regole.append((kw, nome, vie))
     return regole
 
 
-def direttrice(controparte, regole):
+def direttrice(controparte, regole, via=""):
     su = (controparte or "").upper()
-    for kw, nome in regole:
-        if kw in su:
+    vu = (via or "").strip().upper()
+    for kw, nome, vie in regole:
+        if kw in su and (not vie or vu in vie):
             return nome
     return ALTRE
 
@@ -55,7 +58,7 @@ def leggi_corse():
     for f in sorted(CARTELLA.glob("*.csv")):
         with f.open(encoding="utf-8", newline="") as fh:
             rd = csv.DictReader(fh)
-            intestazione = intestazione or rd.fieldnames
+            intestazione = list(intestazione or []) + [c for c in (rd.fieldnames or []) if c not in (intestazione or [])]
             for r in rd:
                 try:
                     r["_ts"] = int(r["ts_programmato"])
@@ -126,7 +129,7 @@ def blocco(rows, oggi, regole):
         dow.append(s)
 
     dirett = []
-    for nome, gr in sorted(raggruppa(rows, lambda r: direttrice(r["controparte"], regole)).items()):
+    for nome, gr in sorted(raggruppa(rows, lambda r: direttrice(r["controparte"], regole, r.get("via"))).items()):
         for dirz, sel in (("tutte", gr),
                           ("partenza", [r for r in gr if r["direzione"] == "partenza"]),
                           ("arrivo", [r for r in gr if r["direzione"] == "arrivo"])):
@@ -159,7 +162,8 @@ def blocco(rows, oggi, regole):
         s["direzione"] = dirz
         s["controparte"] = Counter(r["controparte"] for r in gr if r["controparte"]).most_common(1)[0][0] \
             if any(r["controparte"] for r in gr) else ""
-        s["direttrice"] = direttrice(s["controparte"], regole)
+        vie = Counter(r.get("via") for r in gr if r.get("via") and r["via"] != "-").most_common(1)
+        s["direttrice"] = direttrice(s["controparte"], regole, vie[0][0] if vie else "")
         s["orario"] = Counter(r["orario_programmato"] for r in gr).most_common(1)[0][0]
         treni.append(s)
     treni.sort(key=lambda s: (-s["programmate"], s["numero"]))
@@ -207,12 +211,12 @@ def main():
             lista_oggi.append({
                 "orario": r["orario_programmato"], "reale": r["orario_reale"],
                 "direzione": r["direzione"], "numero": r["numero_treno"],
-                "controparte": r["controparte"], "direttrice": direttrice(r["controparte"], regole),
+                "controparte": r["controparte"], "direttrice": direttrice(r["controparte"], regole, r.get("via")),
                 "stato": r["stato"], "ritardo": r["_rit"], "motivo": r["motivo_ritardo"],
             })
 
     non_classificate = Counter(r["controparte"] for r in righe
-                               if r["controparte"] and direttrice(r["controparte"], regole) == ALTRE)
+                               if r["controparte"] and direttrice(r["controparte"], regole, r.get("via")) == ALTRE)
     ultimi = [datetime.fromisoformat(r["aggiornato_il"]) for r in righe if r.get("aggiornato_il")]
 
     payload = {

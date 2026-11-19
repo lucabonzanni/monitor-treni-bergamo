@@ -1,5 +1,7 @@
-parola_chiave,direttrice
-MILANO,Bergamo–Milano
-TREVIGLIO,Bergamo–Treviglio
-BRESCIA,Bergamo–Brescia
-LECCO,Bergamo–Lecco
+parola_chiave,direttrice,via
+MILANO,Bergamo-Milano via Carnate,Carnate
+MILANO,Bergamo-Milano via Pioltello,Pioltello
+MILANO,Bergamo-Milano (percorso da verificare),
+TREVIGLIO,Bergamo-Treviglio,
+BRESCIA,Bergamo-Brescia,
+LECCO,Bergamo-Lecco,
