@@ -100,7 +100,7 @@ const messaggio = (plot, testo) => plot.replaceChildren(el("div", { class: "msg"
 const LEG = [
   { nome: "Ritardi di almeno 5'", campo: "pct_ritardi_5", n: "n_ritardi_5", base: "effettuate", css: "--c1" },
   { nome: "Ritardi di almeno 15'", campo: "pct_ritardi_15", n: "n_ritardi_15", base: "effettuate", css: "--c2" },
-  { nome: "Soppressioni", campo: "pct_soppresse", n: "soppresse", base: "programmate", css: "--c3" },
+  { nome: "Soppressioni totali", campo: "pct_soppresse", n: "soppresse", base: "programmate", css: "--c3" },
   { nome: "Soppressioni parziali", campo: "pct_sopp_parziali", n: "sopp_parziali", base: "programmate", css: "--c4" }
 ];
 const colori = () => LEG.map(l => css(l.css));
@@ -260,10 +260,7 @@ function scheda(box, o) {
 function statoTreno(r) {
   if (r.stato === "soppresso") return { testo: "Soppresso", colore: "var(--c3)", ico: "✕" };
   if (r.stato === "nd") return { testo: "Dato non disponibile", colore: "var(--muted)", ico: "?" };
-  if (r.stato === "effettuato" && r.parziale) {
-    const n = (r.saltate || []).map(nomeStaz);
-    return { testo: "Soppressione parziale" + (n.length ? " (salta " + n.slice(0, 2).join(", ") + (n.length > 2 ? "…" : "") + ")" : ""), colore: "var(--c4)", ico: "◐" };
-  }
+  if (r.parziale && (r.stato === "parziale" || r.stato === "effettuato")) return { testo: "Soppressione parziale", colore: "var(--c4)", ico: "◐" };
   if (r.stato === "effettuato") {
     const x = r.ritardo == null ? 0 : r.ritardo;
     if (x >= 15) return { testo: `Ritardo grave: ${x}'`, colore: "var(--c2)", ico: "!!" };
@@ -295,16 +292,17 @@ function disegnaOggi() {
   if (!righe.length) return;
   const eff = righe.filter(r => r.stato === "effettuato"), rit5 = eff.filter(r => (r.ritardo || 0) >= 5).length,
     rit15 = eff.filter(r => (r.ritardo || 0) >= 15).length, sop = righe.filter(r => r.stato === "soppresso").length,
-    par = righe.filter(r => r.stato === "effettuato" && r.parziale).length;
+    par = righe.filter(r => r.parziale && (r.stato === "effettuato" || r.stato === "parziale")).length,
+    parFuori = righe.filter(r => r.stato === "parziale").length;
   const attesi = righe.filter(r => r.stato === "programmato" || r.stato === "in_corso").length;
-  const prog = eff.length + sop;
+  const prog = eff.length + sop + parFuori;
   const sulRilevati = n => eff.length ? fp(100 * n / eff.length) + " dei treni rilevati" : "";
   const suCorse = n => prog ? `su ${f0(prog)} corse (${fp(100 * n / prog)})` : "";
   box.append(el("section", { class: "kpis" },
     tile("Treni rilevati", f0(eff.length), attesi ? `${f0(attesi)} ancora attesi` : ""),
     tile("Con ritardo di almeno 5'", f0(rit5), sulRilevati(rit5), "c1"),
     tile("Con ritardo di almeno 15'", f0(rit15), sulRilevati(rit15), "c2"),
-    tile("Soppressioni", f0(sop), suCorse(sop), "c3"),
+    tile("Soppressioni totali", f0(sop), suCorse(sop), "c3"),
     tile("Soppressioni parziali", f0(par), suCorse(par), "c4")));
   let soloAnomalie = false;
   const wrap = el("div", { class: "sc" });
@@ -355,7 +353,7 @@ function disegnaPeriodo() {
     tile("Corse analizzate", f0(T.programmate), `${f0(T.effettuate)} effettuate, ${f0(T.soppresse)} soppresse`),
     tile("Ritardi di almeno 5'", fp(T.pct_ritardi_5), `${f0(T.n_ritardi_5)} su ${f0(T.effettuate)} corse effettuate`, "c1"),
     tile("Ritardi di almeno 15'", fp(T.pct_ritardi_15), `${f0(T.n_ritardi_15)} su ${f0(T.effettuate)} corse effettuate`, "c2"),
-    tile("Soppressioni", fp(T.pct_soppresse), `${f0(T.soppresse)} su ${f0(T.programmate)} corse programmate`, "c3"),
+    tile("Soppressioni totali", fp(T.pct_soppresse), `${f0(T.soppresse)} su ${f0(T.programmate)} corse programmate`, "c3"),
     tile("Soppressioni parziali", fp(T.pct_sopp_parziali), `${f0(T.sopp_parziali)} su ${f0(T.programmate)} corse programmate`, "c4"),
     tile("Ritardo medio", T.ritardo_medio == null ? "n.d." : f1(T.ritardo_medio) + "′", `mediana ${f1(T.ritardo_mediano)}′, massimo ${f0(T.ritardo_max)}′`));
 
@@ -437,7 +435,7 @@ function disegnaTreni(box, treni) {
     ["direttrice", "Direttrice", false, t => t.direttrice],
     ["orario", "Orario", false, t => t.orario], ["programmate", "Corse", true, t => f0(t.programmate)], ["ritardo_medio", "Ritardo medio (′)", true, t => f1(t.ritardo_medio)],
     ["pct_ritardi_5", "% ritardi di almeno 5'", true, t => fp(t.pct_ritardi_5)], ["n_ritardi_15", "Ritardi di almeno 15'", true, t => f0(t.n_ritardi_15)],
-    ["pct_ritardi_15", "% ritardi di almeno 15'", true, t => fp(t.pct_ritardi_15)], ["soppresse", "Soppressioni", true, t => f0(t.soppresse)], ["pct_soppresse", "% soppresse", true, t => fp(t.pct_soppresse)],
+    ["pct_ritardi_15", "% ritardi di almeno 15'", true, t => fp(t.pct_ritardi_15)], ["soppresse", "Soppressioni totali", true, t => f0(t.soppresse)], ["pct_soppresse", "% soppresse", true, t => fp(t.pct_soppresse)],
     ["sopp_parziali", "Soppressioni parziali", true, t => f0(t.sopp_parziali)], ["pct_sopp_parziali", "% soppresse in parte", true, t => fp(t.pct_sopp_parziali)]];
   function ridisegna() {
     const q = cerca.trim().toUpperCase();
@@ -481,7 +479,7 @@ function disegnaDati() {
     files.length ? el("details", null, el("summary", { text: "File giornalieri (ultimi " + files.length + " giorni)" }),
       el("div", { class: "files" }, files.slice().reverse().map(d => el("div", null, el("a", { href: `dati/corse/${d}.csv`, text: d + ".csv" }))))) : null,
     el("p", { class: "fonte" }, "Il codice che raccoglie ed elabora i dati è pubblico: ", el("a", { href: "https://github.com/lucabonzanni/monitor-treni-bergamo", text: "codice e dati su GitHub" }), "."),
-    el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); parziale (1 = soppressione parziale); fermate_soppresse (fermate non effettuate, separate da |); motivo_ritardo. Citare: “elaborazione di Luca Bonzanni su dati ViaggiaTreno”."));
+    el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, parziale = soppressione parziale con Bergamo non servita, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); parziale (1 = soppressione parziale); fermate_soppresse (fermate non effettuate, separate da |); motivo_ritardo. Citare: “elaborazione di Luca Bonzanni su dati ViaggiaTreno”."));
 }
 
 function disegnaMetodologia() {
@@ -490,8 +488,8 @@ function disegnaMetodologia() {
     ["Fonte", "I dati arrivano dal sistema pubblico ViaggiaTreno (Rfi/Trenitalia), che raccoglie anche i treni regionali Trenord. Non è un'Api ufficialmente documentata (può cambiare o interrompersi senza preavviso)."],
     ["Cosa misuriamo", "Per ogni treno in partenza o in arrivo a Bergamo, viene misurata la differenza tra l'orario programmato e quello reale registrato nella stazione di Bergamo (per le partenze conta l'orario di partenza, per gli arrivi l'orario di arrivo)."],
     ["Ritardo e puntualità", "Vengono segnalati i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Un treno in anticipo viene considerato comunque come puntuale."],
-    ["Soppressioni", "Una corsa è considerata soppressa se ViaggiaTreno la segnala come cancellata o se la fermata di Bergamo è tra quelle soppresse. È considerata parzialmente soppressa la corsa che passa da Bergamo ma non effettua altre fermate del suo percorso (per esempio un Bergamo-Milano Centrale che termina la corsa a Verdello Dalmine): è comunque un disservizio per chi viaggia da Bergamo. Le soppressioni parziali sono conteggiate a parte; la corsa resta tra quelle effettuate per il calcolo dei ritardi. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
-    ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (effettuate più soppresse). Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte."],
+    ["Soppressioni", "Sono indicate come soppressioni totali solo le corse interamente non eseguite. Sono soppressioni parziali le corse che partono da una stazione diversa o terminano in una stazione diversa dal previsto (per esempio un Bergamo-Milano Centrale che parte da Treviglio Ovest invece che da Bergamo, o che termina a Verdello Dalmine): sono comunque un disservizio per chi viaggia da Bergamo. Le soppressioni parziali sono conteggiate a parte. Se la corsa passa comunque da Bergamo, il suo ritardo entra nel calcolo; se Bergamo non è servita, non c'è nessun orario da misurare. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
+    ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (tutte quelle previste, con dato rilevato). Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte."],
     ["Copertura", "La rilevazione è iniziata " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + " (non esiste uno storico precedente a tale data). Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione."],
     ["Direttrici", "Le corse sono raggruppate per capolinea (per esempio “Milano” comprende Centrale e Porta Garibaldi). Per Bergamo-Milano si distingue tra via Pioltello (treni che fermano a Treviglio o Pioltello) e via Carnate (treni che fermano a Carnate o Paderno d'Adda), in base alle fermate intermedie registrate da ViaggiaTreno. Le regole si modificano in config/direttrici.csv e si applicano a tutto lo storico." + (nc.length ? " Capolinea non ancora assegnati: " + nc.slice(0, 8).map(x => nomeStaz(x[0]) + " (" + x[1] + ")").join(", ") + "." : "")],
     ["Aggiornamento", "La raccolta parte automaticamente circa ogni 15 minuti; gli avvii possono subire ritardi, quindi i dati più recenti possono arrivare con qualche minuto di scarto. Ultimo aggiornamento dei dati: " + (D.aggiornato_il ? quando(D.aggiornato_il) : "-") + "."],

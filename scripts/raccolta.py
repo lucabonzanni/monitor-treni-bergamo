@@ -14,6 +14,7 @@ Un file CSV per giorno in docs/dati/corse/AAAA-MM-GG.csv. Solo libreria standard
 import csv
 import io
 import json
+import re
 import os
 import sys
 import time
@@ -84,6 +85,38 @@ def json_da(percorso):
         return json.loads(testo)
     except ValueError:
         return None
+
+
+def dettaglio_corsa(riga):
+    """Dettaglio di una corsa. Se ViaggiaTreno non risponde con la stazione di origine registrata
+    (succede quando la corsa viene cancellata in parte e parte da un'altra stazione, es. da Treviglio Ovest
+    invece che da Bergamo), cerca l'origine attuale tramite il numero del treno e riprova."""
+    numero = riga["numero_treno"]
+    d = json_da(f"andamentoTreno/{riga['cod_origine']}/{numero}/{riga['data_corsa_ms']}")
+    if isinstance(d, dict) and d:
+        return d
+    testo = chiedi(f"cercaNumeroTrenoTrenoAutocomplete/{numero}")
+    if not testo:
+        return None
+    try:
+        attesa = int(riga["data_corsa_ms"])
+    except ValueError:
+        attesa = 0
+    trovati = []
+    for m in re.finditer(r"\|(\d+)-([A-Z]\d+)-(\d{10,})", testo):
+        if m.group(1) == numero and m.group(2) != riga["cod_origine"]:
+            trovati.append((abs(int(m.group(3)) - attesa), m.group(2), m.group(3)))
+    trovati.sort()
+    for scarto, cod, ms in trovati[:2]:
+        if attesa and scarto > 36 * 3600000:
+            continue
+        d = json_da(f"andamentoTreno/{cod}/{numero}/{ms}")
+        time.sleep(PAUSA)
+        if isinstance(d, dict) and d:
+            print(f"  treno {numero}: dettaglio trovato con origine {cod} (diversa da {riga['cod_origine']})")
+            return d
+    print(f"  treno {numero}: dettaglio non disponibile (origine {riga['cod_origine']}; ricerca per numero: {testo.strip()[:80]!r})")
+    return None
 
 
 def data_vt(dt):
@@ -239,7 +272,7 @@ def fermate_saltate(d):
                 nomi.append(n)
     visti = []
     for n in nomi:
-        if n not in visti and n != "BERGAMO" and STAZIONE not in n:
+        if n not in visti:
             visti.append(n)
     return visti
 
@@ -287,12 +320,23 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     motivo = d.get("motivoRitardoPrevalente")
     riga["motivo_ritardo"] = str(motivo)[:80] if motivo else ""
 
-    soppresso = (prov == 1 or str(prov) == "1" or tipo == "ST" or bergamo_soppressa(sopp_lista))
-    # soppressione parziale: la corsa passa da Bergamo ma salta altre fermate (es. termina prima della destinazione)
-    parziale = (not soppresso) and (bool(saltate) or prov == 2 or str(prov) == "2")
+    # Soppressione totale: la corsa non è stata eseguita per intero.
+    # Soppressione parziale: la corsa circola, ma parte da una stazione diversa o termina in una diversa dal previsto
+    # (o salta altre fermate). Se Bergamo non è servita, per Bergamo non c'è nessun passaggio da misurare.
+    nomi_fermate = {_nome_fermata(x) for x in (d.get("fermate") or [])}
+    totale = (prov == 1 or str(prov) == "1" or tipo == "ST"
+              or bool(nomi_fermate and nomi_fermate <= set(saltate)))
+    bergamo_non_servita = ("BERGAMO" in saltate or bergamo_soppressa(sopp_lista)
+                           or bool(f and f.get("actualFermataType") == 3))
+    parziale = (not totale) and (bergamo_non_servita or bool(saltate) or prov == 2 or str(prov) == "2")
     riga["parziale"] = "1" if parziale else ""
-    if soppresso:
+    if totale:
         riga["stato"] = "soppresso"
+        riga["orario_reale"] = ""
+        riga["ritardo_min"] = ""
+        riga["definitivo"] = "1" if adesso_ms >= ts else "0"
+    elif parziale and bergamo_non_servita:
+        riga["stato"] = "parziale"
         riga["orario_reale"] = ""
         riga["ritardo_min"] = ""
         riga["definitivo"] = "1" if adesso_ms >= ts else "0"
@@ -352,7 +396,7 @@ def esegui(adesso=None):
     richiesti = aggiornati = 0
     for riga in candidati[:MAX_DETTAGLI]:
         richiesti += 1
-        d = json_da(f"andamentoTreno/{riga['cod_origine']}/{riga['numero_treno']}/{riga['data_corsa_ms']}")
+        d = dettaglio_corsa(riga)
         time.sleep(PAUSA)
         if isinstance(d, dict) and d:
             if aggiorna_da_dettaglio(riga, d, adesso_ms):
@@ -369,7 +413,7 @@ def esegui(adesso=None):
     ]
     recenti.sort(key=lambda r: -int(r["ts_programmato"]))
     for riga in recenti[:MAX_RICONTROLLI]:
-        d = json_da(f"andamentoTreno/{riga['cod_origine']}/{riga['numero_treno']}/{riga['data_corsa_ms']}")
+        d = dettaglio_corsa(riga)
         time.sleep(PAUSA)
         ricontrollati += 1
         if isinstance(d, dict) and d:
@@ -385,7 +429,7 @@ def esegui(adesso=None):
             break
         if riga.get("via") or riga["id"] in gia or "MILANO" not in (riga.get("controparte") or "").upper():
             continue
-        d = json_da(f"andamentoTreno/{riga['cod_origine']}/{riga['numero_treno']}/{riga['data_corsa_ms']}")
+        d = dettaglio_corsa(riga)
         time.sleep(PAUSA)
         percorsi += 1
         if isinstance(d, dict) and d:

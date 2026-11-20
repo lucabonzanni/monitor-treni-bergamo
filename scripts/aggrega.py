@@ -81,9 +81,10 @@ def statistiche(rows):
     eff = [r for r in rows if r["stato"] == "effettuato" and r["_rit"] is not None]
     sopp = [r for r in rows if r["stato"] == "soppresso"]
     nd = [r for r in rows if r["stato"] == "nd"]
-    parz = [r for r in rows if r["stato"] == "effettuato" and r.get("parziale") == "1"]
+    parz = [r for r in rows if r.get("parziale") == "1" and r["stato"] in ("effettuato", "parziale")]
+    parz_fuori = [r for r in rows if r["stato"] == "parziale"]  # Bergamo non servita: nessun orario da misurare
     rit = [max(0, r["_rit"]) for r in eff]  # un treno in anticipo conta come puntuale
-    prog = len(eff) + len(sopp)
+    prog = len(eff) + len(sopp) + len(parz_fuori)
     n5 = sum(1 for x in rit if x >= SOGLIA)
     n15 = sum(1 for x in rit if x >= GRAVE)
     return {
@@ -113,7 +114,7 @@ def raggruppa(rows, chiave):
 
 def blocco(rows, oggi, regole):
     """Tutti i numeri per un periodo (rows = corse del periodo)."""
-    rows = [r for r in rows if r["stato"] in ("effettuato", "soppresso", "nd")]
+    rows = [r for r in rows if r["stato"] in ("effettuato", "soppresso", "parziale", "nd")]
     per_giorno = raggruppa(rows, lambda r: r["data"])
     giorni = []
     for g in sorted(per_giorno):

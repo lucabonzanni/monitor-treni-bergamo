@@ -15,10 +15,10 @@
   --warn-bg: #F3E3BE;
   --warn-ink: #5A3B00;
   /* tre serie, validate con lo script di controllo (CVD e contrasto) */
-  --c1: #B97A0A;   /* ritardi di almeno 5' */
-  --c2: #C4365A;   /* ritardi di almeno 15' */
-  --c3: #5148B0;   /* soppressioni */
-  --c4: #2E8B57;   /* soppressioni parziali */
+  --c1: #A98100;   /* ritardi di almeno 5': giallo */
+  --c2: #6A4BB5;   /* ritardi di almeno 15': viola */
+  --c3: #B3202A;   /* soppressioni totali: rosso */
+  --c4: #D2650E;   /* soppressioni parziali: arancione */
   --ok: #2E7D4F;
 }
 @media (prefers-color-scheme: dark) {
@@ -33,10 +33,10 @@
     --accent: #5DBFA0;
     --warn-bg: #3A2F12;
     --warn-ink: #F2DDA8;
-    --c1: #B8891F;
-    --c2: #E0527A;
-    --c3: #7E86E8;
-    --c4: #4A9E6E;
+    --c1: #BA9612;
+    --c2: #8672D8;
+    --c3: #D2364A;
+    --c4: #E5822C;
     --ok: #4FB27A;
   }
 }
