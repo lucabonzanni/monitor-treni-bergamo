@@ -141,8 +141,8 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
 svg text { font: 12px "Rethink Sans", system-ui, sans-serif; fill: var(--muted); }
 svg .cat { fill: var(--ink2); }
 
-.met { padding-left: 20px; }
-.met li { margin: 8px 0; font-size: .95rem; color: var(--ink2); max-width: 820px; }
+.met { padding-left: 0; }
+.met p { margin: 10px 0; font-size: .95rem; color: var(--ink2); max-width: 820px; }
 .met b { color: var(--ink); }
 ul.dl { padding-left: 20px; }
 ul.dl li { margin: 4px 0; font-size: .95rem; color: var(--ink2); }
@@ -177,4 +177,4 @@ footer, footer a { font-weight: 700; }
 .tendina { margin: 10px 0 0; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .tendina summary { cursor: pointer; padding: 12px 16px; font-weight: 700; color: var(--ink); }
 .tendina[open] summary { border-bottom: 1px solid var(--border); }
-.tendina .met { margin: 0; padding: 4px 20px 12px 36px; }
+.tendina .met { margin: 0; padding: 4px 20px 12px 20px; }

@@ -213,9 +213,12 @@ def main():
         limite = (oggi_d - timedelta(days=n_giorni - 1)).isoformat()
         return [r for r in righe if r["data"] >= limite]
 
-    periodi = {"tutto": blocco(righe, oggi, regole),
-               "30": blocco(da(30), oggi, regole),
-               "7": blocco(da(7), oggi, regole)}
+    periodi = {}
+    for chiave, rr in (("tutto", righe), ("30", da(30)), ("7", da(7))):
+        periodi[chiave] = blocco(rr, oggi, regole)
+        # giorni lavorativi (lunedì-venerdì) e fine settimana (sabato-domenica)
+        periodi[chiave + "_lav"] = blocco([r for r in rr if r["_dow"] < 5], oggi, regole)
+        periodi[chiave + "_we"] = blocco([r for r in rr if r["_dow"] >= 5], oggi, regole)
 
     def elenco(giorno):
         out = []
