@@ -310,6 +310,16 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
         rea = a_ms(f.get(k_rea))
         rit_ufficiale = f.get(k_rit)
 
+    # Capolinea a Bergamo: ViaggiaTreno spesso non registra l'arrivo reale nell'ultima fermata, ma a corsa conclusa
+    # ("arrivato") riporta il ritardo finale del treno, che coincide con quello di arrivo a Bergamo.
+    if (not rea and riga["direzione"] == "arrivo" and d.get("arrivato") is True and f is not None
+            and (d.get("idDestinazione") == STAZIONE or d.get("codDestinazione") == STAZIONE
+                 or f is (d.get("fermate") or [None])[-1])):
+        rit_fin = d.get("ritardo")
+        if isinstance(rit_fin, int) and not isinstance(rit_fin, bool):
+            rea = (teo or ts) + rit_fin * 60000
+            rit_ufficiale = rit_fin
+
     via = percorso(d)
     if via:
         riga["via"] = via
