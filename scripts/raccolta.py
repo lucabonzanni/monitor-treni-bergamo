@@ -35,6 +35,7 @@ OFFSET_TABELLE_MIN = (-30, 0, 45, 90, 135)  # a che ora "guardiamo" le tabelle, 
 ANTICIPO_DETTAGLIO_MIN = 10   # chiediamo il dettaglio dai 10 minuti prima dell'orario previsto
 SCADENZA_ORE = 6              # dopo 6 ore senza dati definitivi il treno diventa "nd"
 MAX_DETTAGLI = 80             # limite di richieste di dettaglio per esecuzione
+ATTESA_STIMA_MIN = 30         # minuti oltre l'arrivo atteso, dopo i quali un capolinea non registrato viene stimato
 MAX_RICONTROLLI = 20          # limite di riletture di corse già effettuate (per cogliere soppressioni parziali tardive)
 RICONTROLLO_ORE = 2           # le corse effettuate vengono rilette per questo tempo dopo l'orario programmato
 MAX_PERCORSI = 25             # limite di richieste per completare il percorso ("via") dei treni da/per Milano
@@ -44,10 +45,10 @@ CAMPI = [
     "id", "data", "direzione", "numero_treno", "controparte",
     "orario_programmato", "orario_reale", "ritardo_min", "stato",
     "provvedimento", "tipo_treno", "fermate_soppresse", "motivo_ritardo",
-    "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms", "via", "parziale",
+    "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms", "via", "parziale", "stimato",
 ]
 CAMPI_CONFRONTO = ["orario_reale", "ritardo_min", "stato", "provvedimento", "tipo_treno",
-                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via", "parziale"]
+                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via", "parziale", "stimato"]
 
 _base_ok = None
 
@@ -319,6 +320,22 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
         if isinstance(rit_fin, int) and not isinstance(rit_fin, bool):
             rea = (teo or ts) + rit_fin * 60000
             rit_ufficiale = rit_fin
+
+    # Capolinea non registrato: ViaggiaTreno a volte perde il treno nell'ultima stazione (ultimo rilevamento prima di Bergamo,
+    # "arrivato" sempre falso). Se Bergamo è il capolinea, nessuna soppressione è segnalata e sono passati
+    # ATTESA_STIMA_MIN minuti oltre l'arrivo atteso, si usa l'ultimo ritardo noto e si segna la riga come stimata.
+    stimato = False
+    if (not rea and riga["direzione"] == "arrivo" and f is not None and not d.get("fermateSoppresse")
+            and (d.get("idDestinazione") == STAZIONE or f is (d.get("fermate") or [None])[-1])
+            and d.get("provvedimento") in (0, None, "0")):
+        rit_ult = d.get("ritardo")
+        if isinstance(rit_ult, int) and not isinstance(rit_ult, bool) and d.get("oraUltimoRilevamento"):
+            atteso = (teo or ts) + max(rit_ult, 0) * 60000
+            if adesso_ms >= atteso + ATTESA_STIMA_MIN * 60000:
+                rea = atteso
+                rit_ufficiale = rit_ult
+                stimato = True
+    riga["stimato"] = "1" if stimato else ""
 
     via = percorso(d)
     if via:
