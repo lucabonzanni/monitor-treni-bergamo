@@ -27,6 +27,7 @@ CONFIG = Path(os.environ.get("CONFIG_DIRETTRICI", "config/direttrici.csv"))
 SOGLIA = 5    # minuti: "ritardo" (da almeno 5')
 GRAVE = 15    # minuti: "ritardo grave" (da almeno 15')
 ALTRE = "Altre direttrici"
+DATA_INIZIO = os.environ.get("DATA_INIZIO", "2026-11-20")  # prima giornata piena di rilevazione
 GIORNI_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 
 
@@ -60,6 +61,8 @@ def leggi_corse():
             rd = csv.DictReader(fh)
             intestazione = list(intestazione or []) + [c for c in (rd.fieldnames or []) if c not in (intestazione or [])]
             for r in rd:
+                if (r.get("data") or "") < DATA_INIZIO:
+                    continue
                 try:
                     r["_ts"] = int(r["ts_programmato"])
                 except (KeyError, ValueError, TypeError):
@@ -83,6 +86,8 @@ def statistiche(rows):
     nd = [r for r in rows if r["stato"] == "nd"]
     parz = [r for r in rows if r.get("parziale") == "1" and r["stato"] in ("effettuato", "parziale")]
     parz_fuori = [r for r in rows if r["stato"] == "parziale"]  # Bergamo non servita: nessun orario da misurare
+    diss = [r for r in rows if r["stato"] == "soppresso" or r.get("parziale") == "1"
+            or (r["stato"] == "effettuato" and r["_rit"] is not None and r["_rit"] >= GRAVE)]  # ogni corsa conta una volta sola
     rit = [max(0, r["_rit"]) for r in eff]  # un treno in anticipo conta come puntuale
     prog = len(eff) + len(sopp) + len(parz_fuori)
     n5 = sum(1 for x in rit if x >= SOGLIA)
@@ -92,6 +97,9 @@ def statistiche(rows):
         "effettuate": len(eff),
         "soppresse": len(sopp),
         "sopp_parziali": len(parz),
+        "parziali_senza_passaggio": len(parz_fuori),
+        "disservizi": len(diss),
+        "pct_disservizi": pct(len(diss), prog),
         "nd": len(nd),
         "ritardo_medio": round(statistics.mean(rit), 1) if rit else None,
         "ritardo_mediano": round(statistics.median(rit), 1) if rit else None,
@@ -225,7 +233,7 @@ def main():
 
     ieri = (oggi_d - timedelta(days=1)).isoformat()
     lista_oggi = elenco(oggi)
-    lista_ieri = elenco(ieri)
+    lista_ieri = elenco(ieri) if ieri >= DATA_INIZIO else []
 
     non_classificate = Counter(r["controparte"] for r in righe
                                if r["controparte"] and direttrice(r["controparte"], regole, r.get("via")) == ALTRE)
