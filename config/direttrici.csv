@@ -1,7 +1,15 @@
-parola_chiave,direttrice,via
-MILANO,Bergamo-Milano via Carnate,Carnate
-MILANO,Bergamo-Milano via Pioltello,Pioltello
-MILANO,Bergamo-Milano (percorso da verificare),
-TREVIGLIO,Bergamo-Treviglio,
-BRESCIA,Bergamo-Brescia,
-LECCO,Bergamo-Lecco,
+estremo_1,estremo_2,direttrice,via
+BERGAMO,MILANO,Bergamo-Milano via Carnate,Carnate
+BERGAMO,MILANO,Bergamo-Milano via Pioltello,Pioltello
+BERGAMO,MILANO,Bergamo-Milano (percorso da verificare),
+BERGAMO,TREVIGLIO,Bergamo-Treviglio,
+BERGAMO,BRESCIA,Bergamo-Brescia,
+BERGAMO,LECCO,Bergamo-Lecco,
+BERGAMO,CREMONA,Bergamo-Cremona,
+PONTE S.PIETRO,MILANO,Milano-Ponte San Pietro via Carnate,
+PONTE S.PIETRO,LECCO,Lecco-Ponte San Pietro,
+TREVIGLIO,CREMONA,Treviglio-Cremona,
+TREVIGLIO,VARESE,Varese-Treviglio,
+TREVIGLIO,MILANO,Milano-Treviglio,
+MILANO,BRESCIA,Milano-Brescia via Treviglio,
+MILANO,VERONA,Milano-Verona via Treviglio,

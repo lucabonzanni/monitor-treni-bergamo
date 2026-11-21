@@ -8,6 +8,9 @@ Legge tutti i CSV giornalieri (docs/dati/corse/*.csv) e produce:
   - docs/dati/corse_complete.csv  tutte le corse in un unico file, da scaricare
 
 Le "direttrici" si modificano in config/direttrici.csv (si ricalcola tutto lo storico).
+Le stazioni monitorate e la data da cui si contano i loro dati sono in config/stazioni.csv.
+Un treno che passa da più stazioni (o che compare sia in arrivo sia in partenza nella stessa stazione) viene
+contato UNA volta sola: l'unità di conto è il "treno-giorno" (numero del treno + giorno di servizio).
 Solo libreria standard.
 """
 import csv
@@ -24,6 +27,8 @@ RM = ZoneInfo("Europe/Rome")
 CARTELLA = Path(os.environ.get("CARTELLA_CORSE", "docs/dati/corse"))
 USCITA = Path(os.environ.get("USCITA_DATI", "docs/dati"))
 CONFIG = Path(os.environ.get("CONFIG_DIRETTRICI", "config/direttrici.csv"))
+CONFIG_STAZ = Path(os.environ.get("CONFIG_STAZIONI", "config/stazioni.csv"))
+STAZIONE_BASE = "S01529"  # Bergamo: le righe registrate prima delle altre stazioni non hanno la colonna "stazione"
 SOGLIA = 5    # minuti: "ritardo" (da almeno 5')
 GRAVE = 15    # minuti: "ritardo grave" (da almeno 15')
 ALTRE = "Altre direttrici"
@@ -32,37 +37,60 @@ SOGLIA_ACCUMULO = 2  # minuti: un ritardo di 1' può essere un arrotondamento, q
 GIORNI_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 
 
+def leggi_stazioni():
+    """Stazioni monitorate: codice, nome, nome ViaggiaTreno e data da cui contare i dati (config/stazioni.csv)."""
+    out = []
+    if CONFIG_STAZ.exists():
+        with CONFIG_STAZ.open(encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                cod = (r.get("codice") or "").strip()
+                nome = (r.get("nome") or "").strip()
+                if cod and nome:
+                    out.append({"codice": cod, "nome": nome,
+                                "nome_vt": (r.get("nome_viaggiatreno") or nome).strip().upper(),
+                                "data_inizio": (r.get("data_inizio") or "").strip() or DATA_INIZIO})
+    return out or [{"codice": STAZIONE_BASE, "nome": "Bergamo", "nome_vt": "BERGAMO", "data_inizio": DATA_INIZIO}]
+
+
 def leggi_regole():
+    """Regole delle direttrici: una riga = due capolinea (estremo_1, estremo_2, in qualsiasi ordine) e, se serve, il percorso.
+    Vale la prima regola che corrisponde. Formato precedente (parola_chiave) ancora accettato: vale per Bergamo."""
     regole = []
     if CONFIG.exists():
         with CONFIG.open(encoding="utf-8", newline="") as f:
             for r in csv.DictReader(f):
-                kw = (r.get("parola_chiave") or "").strip().upper()
+                k1 = (r.get("estremo_1") or r.get("parola_chiave") or "").strip().upper()
+                k2 = (r.get("estremo_2") or ("BERGAMO" if r.get("parola_chiave") else "")).strip().upper()
                 nome = (r.get("direttrice") or "").strip()
-                # terza colonna facoltativa: percorso richiesto (es. Carnate); vuota = qualsiasi
+                # colonna facoltativa: percorso richiesto (es. Carnate); vuota = qualsiasi
                 vie = [v.strip().upper() for v in (r.get("via") or "").split("|") if v.strip()]
-                if kw and nome:
-                    regole.append((kw, nome, vie))
+                if k1 and nome:
+                    regole.append((k1, k2, nome, vie))
     return regole
 
 
-def direttrice(controparte, regole, via=""):
-    su = (controparte or "").upper()
+def direttrice(da, a, regole, via=""):
+    """Direttrice di un treno dai suoi due capolinea (da, a)."""
+    d, z = (da or "").upper(), (a or "").upper()
     vu = (via or "").strip().upper()
-    for kw, nome, vie in regole:
-        if kw in su and (not vie or vu in vie):
+    for k1, k2, nome, vie in regole:
+        if vie and vu not in vie:
+            continue
+        if (k1 in d and k2 in z) or (k1 in z and k2 in d) if k2 else (k1 in d or k1 in z):
             return nome
     return ALTRE
 
 
-def leggi_corse():
+def leggi_corse(stazioni):
+    inizio = {x["codice"]: x["data_inizio"] for x in stazioni}
     righe, intestazione = [], None
     for f in sorted(CARTELLA.glob("*.csv")):
         with f.open(encoding="utf-8", newline="") as fh:
             rd = csv.DictReader(fh)
             intestazione = list(intestazione or []) + [c for c in (rd.fieldnames or []) if c not in (intestazione or [])]
             for r in rd:
-                if (r.get("data") or "") < DATA_INIZIO:
+                r["_staz"] = (r.get("stazione") or "").strip() or STAZIONE_BASE
+                if (r.get("data") or "") < inizio.get(r["_staz"], DATA_INIZIO):
                     continue
                 try:
                     r["_ts"] = int(r["ts_programmato"])
@@ -74,6 +102,64 @@ def leggi_corse():
                 r["_dow"] = dt.weekday()
                 righe.append(r)
     return righe, intestazione
+
+
+def estremi(rows, nome_vt):
+    """I due capolinea del treno (da, a), ricavati dalle sue righe: l'origine dalla riga di arrivo, la destinazione
+    dalla riga di partenza; in mancanza, il capolinea è la stazione stessa o il dato del dettaglio della corsa."""
+    # prima il dato del dettaglio della corsa (capolinea veri), poi quello della tabella della stazione
+    da = next(((r.get("origine") or "").strip().upper() for r in rows if (r.get("origine") or "").strip()), "")
+    a = next(((r.get("destinazione") or "").strip().upper() for r in rows if (r.get("destinazione") or "").strip()), "")
+    for r in rows:
+        c = (r.get("controparte") or "").strip().upper()
+        if r["direzione"] == "arrivo" and c and not da:
+            da = c
+        if r["direzione"] == "partenza" and c and not a:
+            a = c
+    if not da:
+        for r in rows:
+            if r["direzione"] == "partenza" and r.get("cod_origine") == r["_staz"]:
+                da = nome_vt.get(r["_staz"], ""); break
+    if not a:
+        for r in rows:
+            if r["direzione"] == "arrivo":
+                a = nome_vt.get(r["_staz"], ""); break
+    if not da:
+        da = next(((r.get("origine") or "").strip().upper() for r in rows if (r.get("origine") or "").strip()), "")
+    if not a:
+        a = next(((r.get("destinazione") or "").strip().upper() for r in rows if (r.get("destinazione") or "").strip()), "")
+    return da, a
+
+
+def unifica(righe, stazioni, regole):
+    """Un'unità per treno-giorno (numero del treno + giorno di servizio), anche se il treno compare in più stazioni
+    o sia in arrivo sia in partenza nella stessa stazione. La riga di riferimento è quella della stazione con priorità
+    più alta (l'ordine di config/stazioni.csv: Bergamo, Treviglio, Ponte San Pietro), salvo che sia "nd" (dato non
+    disponibile) e un'altra stazione abbia un esito; a parità di stazione prevale la riga di arrivo."""
+    prio = {x["codice"]: i for i, x in enumerate(stazioni)}
+    nome_vt = {x["codice"]: x["nome_vt"] for x in stazioni}
+    nome = {x["codice"]: x["nome"] for x in stazioni}
+    gruppi = defaultdict(list)
+    for r in righe:
+        gruppi[(r["numero_treno"], r.get("data_corsa_ms") or r["data"])].append(r)
+    unita = []
+    for rows in gruppi.values():
+        rif = min(rows, key=lambda r: (1 if r["stato"] == "nd" else 0, prio.get(r["_staz"], 99),
+                                       0 if r["direzione"] == "arrivo" else 1, r["_ts"]))
+        u = dict(rif)
+        da, a = estremi(rows, nome_vt)
+        stazione_vt = nome_vt.get(rif["_staz"], "")
+        u["_dir_staz"] = rif["direzione"]
+        u["direzione"] = "partenza" if da == stazione_vt else ("arrivo" if a == stazione_vt else "transito")
+        u["_da"], u["_a"] = da, a
+        u["_ctrp"] = (rif.get("controparte") or "").strip().upper()
+        u["_stazione"] = nome.get(rif["_staz"], rif["_staz"])
+        u["_stazioni"] = sorted({r["_staz"] for r in rows}, key=lambda c: prio.get(c, 99))
+        vie = Counter(r.get("via") for r in rows if r.get("via") and r["via"] != "-").most_common(1)
+        u["via"] = vie[0][0] if vie else (rif.get("via") or "")
+        u["_direttrice"] = direttrice(da, a, regole, u["via"])
+        unita.append(u)
+    return unita
 
 
 def pct(a, b):
@@ -127,7 +213,7 @@ def accumulo(rows_giorno):
     solo = sum(ritardo_valido(r) for r in rows_giorno)
     corse_ritardo = sum(1 for r in rows_giorno if ritardo_valido(r) > 0)
     attesa, n_attese, esclusi, provvisorio = 0, 0, 0, False
-    tratte = raggruppa(rows_giorno, lambda r: (r["direzione"], (r.get("controparte") or "").upper()))
+    tratte = raggruppa(rows_giorno, lambda r: (r.get("_staz"), r["direzione"], r.get("_ctrp") or (r.get("controparte") or "").upper()))
     for gr in tratte.values():
         gr = sorted(gr, key=lambda r: r["_ts"])
         for i, r in enumerate(gr):
@@ -184,7 +270,7 @@ def blocco(rows, oggi, regole, giorni_attesi=None):
         dow.append(s)
 
     dirett = []
-    for nome, gr in sorted(raggruppa(rows, lambda r: direttrice(r["controparte"], regole, r.get("via"))).items()):
+    for nome, gr in sorted(raggruppa(rows, lambda r: r["_direttrice"]).items()):
         for dirz, sel in (("tutte", gr),
                           ("partenza", [r for r in gr if r["direzione"] == "partenza"]),
                           ("arrivo", [r for r in gr if r["direzione"] == "arrivo"])):
@@ -211,14 +297,15 @@ def blocco(rows, oggi, regole, giorni_attesi=None):
                              "pct_ritardi_5": s["pct_ritardi_5"], "ritardo_medio": s["ritardo_medio"]})
 
     treni = []
-    for (num, dirz), gr in raggruppa(rows, lambda r: (r["numero_treno"], r["direzione"])).items():
+    for num, gr in raggruppa(rows, lambda r: r["numero_treno"]).items():
         s = statistiche(gr)
         s["numero"] = num
-        s["direzione"] = dirz
-        s["controparte"] = Counter(r["controparte"] for r in gr if r["controparte"]).most_common(1)[0][0] \
-            if any(r["controparte"] for r in gr) else ""
-        vie = Counter(r.get("via") for r in gr if r.get("via") and r["via"] != "-").most_common(1)
-        s["direttrice"] = direttrice(s["controparte"], regole, vie[0][0] if vie else "")
+        s["direzione"] = Counter(r["direzione"] for r in gr).most_common(1)[0][0]
+        s["da"] = Counter(r["_da"] for r in gr if r["_da"]).most_common(1)[0][0] if any(r["_da"] for r in gr) else ""
+        s["a"] = Counter(r["_a"] for r in gr if r["_a"]).most_common(1)[0][0] if any(r["_a"] for r in gr) else ""
+        s["controparte"] = (s["a"] if s["direzione"] == "partenza" else s["da"]) or s["a"] or s["da"]
+        s["direttrice"] = Counter(r["_direttrice"] for r in gr).most_common(1)[0][0]
+        s["stazione"] = Counter(r["_stazione"] for r in gr).most_common(1)[0][0]
         s["orario"] = Counter(r["orario_programmato"] for r in gr).most_common(1)[0][0]
         treni.append(s)
     treni.sort(key=lambda s: (-s["programmate"], s["numero"]))
@@ -244,12 +331,16 @@ def scrivi_se_cambiato(percorso, testo):
 
 
 def main():
-    righe, intestazione = leggi_corse()
+    stazioni = leggi_stazioni()
     regole = leggi_regole()
+    righe_grezze, intestazione = leggi_corse(stazioni)
+    # da qui in poi si lavora sulle unità treno-giorno (nessun doppione tra stazioni); righe_grezze serve solo al file .csv completo
+    righe = unifica(righe_grezze, stazioni, regole)
     oggi = os.environ.get("OGGI") or datetime.now(RM).date().isoformat()
     oggi_d = datetime.fromisoformat(oggi).date()
 
     righe.sort(key=lambda r: (r["_ts"], r["id"]))
+    righe_grezze.sort(key=lambda r: (r["_ts"], r["id"]))
     date_con_dati = sorted({r["data"] for r in righe})
 
     def da(n_giorni):
@@ -275,8 +366,10 @@ def main():
     for chiave, rr, n in (("tutto", righe, None), ("30", da(30), 30), ("7", da(7), 7)):
         periodi[chiave] = blocco(rr, oggi, regole, attesi(n))
         # giorni lavorativi (lunedì-venerdì) e fine settimana (sabato-domenica)
-        periodi[chiave + "_lav"] = blocco([r for r in rr if r["_dow"] < 5], oggi, regole)
-        periodi[chiave + "_we"] = blocco([r for r in rr if r["_dow"] >= 5], oggi, regole)
+        # solo quando i giorni di dati sono abbastanza da avere un senso (almeno due settimane)
+        if len({r["data"] for r in rr}) >= 14:
+            periodi[chiave + "_lav"] = blocco([r for r in rr if r["_dow"] < 5], oggi, regole)
+            periodi[chiave + "_we"] = blocco([r for r in rr if r["_dow"] >= 5], oggi, regole)
 
     def elenco(giorno):
         out = []
@@ -285,7 +378,8 @@ def main():
                 out.append({
                     "orario": r["orario_programmato"], "reale": r["orario_reale"],
                     "direzione": r["direzione"], "numero": r["numero_treno"],
-                    "controparte": r["controparte"], "direttrice": direttrice(r["controparte"], regole, r.get("via")),
+                    "stazione": r["_stazione"], "stazioni": r["_stazioni"], "da": r["_da"], "a": r["_a"],
+                    "controparte": r["_ctrp"], "direttrice": r["_direttrice"],
                     "stato": r["stato"], "ritardo": r["_rit"], "motivo": r["motivo_ritardo"],
                     "parziale": r.get("parziale") == "1",
                     "stimato": r.get("stimato") == "1",
@@ -300,8 +394,7 @@ def main():
     lista_oggi = elenco(oggi)
     lista_ieri = elenco(ieri) if ieri >= DATA_INIZIO else []
 
-    non_classificate = Counter(r["controparte"] for r in righe
-                               if r["controparte"] and direttrice(r["controparte"], regole, r.get("via")) == ALTRE)
+    non_classificate = Counter(f'{r["_da"]} → {r["_a"]}' for r in righe if r["_direttrice"] == ALTRE)
     ultimi = [datetime.fromisoformat(r["aggiornato_il"]) for r in righe if r.get("aggiornato_il")]
 
     payload = {
@@ -311,6 +404,7 @@ def main():
         "ultima_data": date_con_dati[-1] if date_con_dati else None,
         "giorni_con_dati": len(date_con_dati),
         "soglie": {"ritardo": SOGLIA, "ritardo_grave": GRAVE},
+        "stazioni": [{"codice": x["codice"], "nome": x["nome"], "data_inizio": x["data_inizio"]} for x in stazioni],
         "periodi": periodi,
         "ritardi_accumulati": ritardi_accumulati,
         "oggi_elenco": lista_oggi,
@@ -318,7 +412,8 @@ def main():
         "ieri_elenco": lista_ieri,
         "controparti_non_classificate": non_classificate.most_common(30),
         "file_giornalieri": date_con_dati[-30:],
-        "totale_righe": len(righe),
+        "totale_righe": len(righe_grezze),
+        "totale_corse": len(righe),
     }
     testo = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     c1 = scrivi_se_cambiato(USCITA / "riepilogo.json", testo)
@@ -327,10 +422,10 @@ def main():
     if intestazione:
         w = csv.DictWriter(buf, fieldnames=intestazione, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
-        for r in righe:
+        for r in righe_grezze:
             w.writerow({c: r.get(c) or "" for c in intestazione})
     c2 = scrivi_se_cambiato(USCITA / "corse_complete.csv", buf.getvalue())
-    print(f"Aggregazione: {len(righe)} corse in {len(date_con_dati)} giorni | "
+    print(f"Aggregazione: {len(righe)} corse (da {len(righe_grezze)} righe) in {len(date_con_dati)} giorni | "
           f"riepilogo.json {'aggiornato' if c1 else 'invariato'} | corse_complete.csv {'aggiornato' if c2 else 'invariato'}")
     if non_classificate:
         print("Controparti non assegnate a una direttrice:", ", ".join(f"{n} ({c})" for n, c in non_classificate.most_common(10)))

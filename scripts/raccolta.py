@@ -4,10 +4,13 @@
 RACCOLTA DATI - Monitor treni Bergamo
 
 Ogni volta che viene eseguito (di norma ogni 15 minuti, da GitHub Actions):
-  1. legge da ViaggiaTreno le tabelle di partenze e arrivi della stazione di Bergamo;
+  1. legge da ViaggiaTreno le tabelle di partenze e arrivi delle stazioni monitorate
+     (elenco in config/stazioni.csv: Bergamo, Treviglio, Ponte San Pietro);
   2. aggiunge al file CSV del giorno i treni nuovi;
   3. per i treni il cui orario è arrivato (o sta per arrivare) chiede il dettaglio
-     della corsa e registra il ritardo REALE a Bergamo, oppure la soppressione.
+     della corsa e registra il ritardo REALE nella stazione, oppure la soppressione.
+Un treno che passa da più stazioni genera una riga per stazione: i doppioni
+vengono eliminati in fase di aggregazione (aggrega.py).
 
 Un file CSV per giorno in docs/dati/corse/AAAA-MM-GG.csv. Solo libreria standard.
 """
@@ -25,7 +28,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 RM = ZoneInfo("Europe/Rome")
-STAZIONE = "S01529"  # codice ViaggiaTreno di Bergamo (verificato dal test)
+STAZIONE = "S01529"  # codice ViaggiaTreno di Bergamo (verificato dal test): è la stazione "di riferimento"
+CONFIG_STAZIONI = Path(os.environ.get("CONFIG_STAZIONI", "config/stazioni.csv"))
+STAZIONI_DEFAULT = [
+    {"codice": "S01529", "nome": "Bergamo", "nome_vt": "BERGAMO"},
+    {"codice": "S01708", "nome": "Treviglio", "nome_vt": "TREVIGLIO"},
+    {"codice": "S01528", "nome": "Ponte San Pietro", "nome_vt": "PONTE S.PIETRO"},
+]
+# categorie di treno escluse (alta velocità e lunga percorrenza): il monitor riguarda i treni regionali
+CATEGORIE_ESCLUSE = {"FR", "FA", "FB", "IC", "ICN", "EC", "EN", "ES", "EXP", "ITA", "EE", "TGV", "RJ", "NJ"}
 BASI = [
     "https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno/",
     "https://www.viaggiatreno.it/infomobilitamobile/resteasy/viaggiatreno/",
@@ -46,11 +57,32 @@ CAMPI = [
     "orario_programmato", "orario_reale", "ritardo_min", "stato",
     "provvedimento", "tipo_treno", "fermate_soppresse", "motivo_ritardo",
     "definitivo", "aggiornato_il", "ts_programmato", "cod_origine", "data_corsa_ms", "via", "parziale", "stimato",
+    "stazione", "origine", "destinazione",
 ]
 CAMPI_CONFRONTO = ["orario_reale", "ritardo_min", "stato", "provvedimento", "tipo_treno",
-                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via", "parziale", "stimato"]
+                   "fermate_soppresse", "motivo_ritardo", "definitivo", "controparte", "via", "parziale", "stimato",
+                   "origine", "destinazione"]
 
 _base_ok = None
+_cache_dettagli = {}
+
+
+def leggi_stazioni():
+    """Stazioni monitorate, da config/stazioni.csv (colonne: codice, nome, nome_viaggiatreno, data_inizio)."""
+    stazioni = []
+    if CONFIG_STAZIONI.exists():
+        with CONFIG_STAZIONI.open(encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                cod = (r.get("codice") or "").strip()
+                nome = (r.get("nome") or "").strip()
+                if cod and nome:
+                    stazioni.append({"codice": cod, "nome": nome,
+                                     "nome_vt": ((r.get("nome_viaggiatreno") or nome).strip()).upper()})
+    return stazioni or [dict(x) for x in STAZIONI_DEFAULT]
+
+
+STAZIONI = leggi_stazioni()
+NOME_VT = {x["codice"]: x["nome_vt"] for x in STAZIONI}
 
 
 # ------------------------------------------------------------------ rete
@@ -93,8 +125,12 @@ def dettaglio_corsa(riga):
     (succede quando la corsa viene cancellata in parte e parte da un'altra stazione, es. da Treviglio Ovest
     invece che da Bergamo), cerca l'origine attuale tramite il numero del treno e riprova."""
     numero = riga["numero_treno"]
+    chiave = (riga["cod_origine"], numero, riga["data_corsa_ms"])
+    if chiave in _cache_dettagli:  # lo stesso treno compare in più stazioni: una sola richiesta per esecuzione
+        return _cache_dettagli[chiave]
     d = json_da(f"andamentoTreno/{riga['cod_origine']}/{numero}/{riga['data_corsa_ms']}")
     if isinstance(d, dict) and d:
+        _cache_dettagli[chiave] = d
         return d
     testo = chiedi(f"cercaNumeroTrenoTrenoAutocomplete/{numero}")
     if not testo:
@@ -115,6 +151,7 @@ def dettaglio_corsa(riga):
         time.sleep(PAUSA)
         if isinstance(d, dict) and d:
             print(f"  treno {numero}: dettaglio trovato con origine {cod} (diversa da {riga['cod_origine']})")
+            _cache_dettagli[chiave] = d
             return d
     print(f"  treno {numero}: dettaglio non disponibile (origine {riga['cod_origine']}; ricerca per numero: {testo.strip()[:80]!r})")
     return None
@@ -126,8 +163,8 @@ def data_vt(dt):
     return urllib.parse.quote(s, safe="")
 
 
-def tabella(tipo, dt):
-    dati = json_da(f"{tipo}/{STAZIONE}/{data_vt(dt)}")
+def tabella(tipo, dt, codice=STAZIONE):
+    dati = json_da(f"{tipo}/{codice}/{data_vt(dt)}")
     return dati if isinstance(dati, list) else None
 
 
@@ -174,6 +211,8 @@ class Archivio:
             if f.exists():
                 testo = f.read_text(encoding="utf-8")
                 for r in csv.DictReader(io.StringIO(testo)):
+                    if not r.get("stazione"):
+                        r["stazione"] = STAZIONE  # righe registrate prima dell'arrivo delle altre stazioni: Bergamo
                     rows[r["id"]] = r
             self.originali[giorno] = testo
             self.giorni[giorno] = rows
@@ -202,7 +241,9 @@ class Archivio:
 
 
 # ------------------------------------------------------------------ passo 1: tabelle
-def aggiungi_da_tabella(arch, item, direzione, adesso_iso):
+def aggiungi_da_tabella(arch, item, direzione, adesso_iso, stazione=STAZIONE):
+    if str(item.get("categoria") or "").strip().upper() in CATEGORIE_ESCLUSE:
+        return False
     if direzione == "partenza":
         ts = a_ms(item.get("orarioPartenza")) or a_ms(item.get("orarioPartenzaZero"))
         controparte = item.get("destinazione") or item.get("destinazioneZero") or ""
@@ -217,6 +258,8 @@ def aggiungi_da_tabella(arch, item, direzione, adesso_iso):
     data_corsa = (a_ms(item.get("millisDataPartenza")) or a_ms(item.get("dataPartenzaTreno"))
                   or mezzanotte_ms(giorno))
     rid = f"{cod_origine}-{numero}-{data_corsa}-{direzione[0]}"
+    if stazione != STAZIONE:
+        rid = f"{stazione}-{rid}"  # il treno è lo stesso, ma la riga riguarda un'altra stazione
     righe = arch.righe(giorno)
     if rid in righe:
         if not righe[rid].get("controparte") and controparte:
@@ -229,27 +272,37 @@ def aggiungi_da_tabella(arch, item, direzione, adesso_iso):
         "fermate_soppresse": "", "motivo_ritardo": "", "definitivo": "0",
         "aggiornato_il": adesso_iso, "ts_programmato": str(ts),
         "cod_origine": cod_origine, "data_corsa_ms": str(data_corsa), "via": "",
+        "stazione": stazione, "origine": "", "destinazione": "",
     }
     return True
 
 
 # ------------------------------------------------------------------ passo 2: dettaglio
-def fermata_bergamo(d):
+def fermata_stazione(d, codice=STAZIONE, nome="BERGAMO"):
+    """La fermata della corsa nella stazione monitorata (per codice, altrimenti per nome identico)."""
     fermate = d.get("fermate") or []
     for f in fermate:
-        if f.get("id") == STAZIONE:
+        if f.get("id") == codice:
             return f
     for f in fermate:
-        if str(f.get("stazione", "")).strip().upper() == "BERGAMO":
+        if str(f.get("stazione", "")).strip().upper() == nome:
             return f
     return None
 
 
-def bergamo_soppressa(lista):
-    if not lista:
-        return False
-    s = json.dumps(lista, ensure_ascii=False).upper()
-    return STAZIONE in s or "BERGAMO" in s
+fermata_bergamo = fermata_stazione  # nome storico
+
+
+def stazione_soppressa(lista, codice=STAZIONE, nome="BERGAMO"):
+    """True se tra le fermate soppresse c'è la stazione (confronto esatto: Treviglio non è Treviglio Ovest)."""
+    for x in lista or []:
+        valori = [str(v).strip().upper() for v in x.values()] if isinstance(x, dict) else [str(x).strip().upper()]
+        if codice in valori or nome in valori:
+            return True
+    return False
+
+
+bergamo_soppressa = stazione_soppressa  # nome storico
 
 
 def _nome_fermata(x):
@@ -306,7 +359,12 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     prov = d.get("provvedimento")
     tipo = d.get("tipoTreno")
     sopp_lista = d.get("fermateSoppresse") or []
-    f = fermata_bergamo(d)
+    cod_st = riga.get("stazione") or STAZIONE
+    nome_st = NOME_VT.get(cod_st, "BERGAMO")
+    f = fermata_stazione(d, cod_st, nome_st)
+    for k_d, k_r in (("origine", "origine"), ("destinazione", "destinazione")):
+        if d.get(k_d):
+            riga[k_r] = str(d.get(k_d)).strip().upper()
 
     if riga["direzione"] == "partenza":
         k_teo, k_rea, k_rit = "partenza_teorica", "partenzaReale", "ritardoPartenza"
@@ -322,7 +380,7 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     # Capolinea a Bergamo: ViaggiaTreno spesso non registra l'arrivo reale nell'ultima fermata, ma a corsa conclusa
     # ("arrivato") riporta il ritardo finale del treno, che coincide con quello di arrivo a Bergamo.
     if (not rea and riga["direzione"] == "arrivo" and d.get("arrivato") is True and f is not None
-            and (d.get("idDestinazione") == STAZIONE or d.get("codDestinazione") == STAZIONE
+            and (d.get("idDestinazione") == cod_st or d.get("codDestinazione") == cod_st
                  or f is (d.get("fermate") or [None])[-1])):
         rit_fin = d.get("ritardo")
         if isinstance(rit_fin, int) and not isinstance(rit_fin, bool):
@@ -334,7 +392,7 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     # ATTESA_STIMA_MIN minuti oltre l'arrivo atteso, si usa l'ultimo ritardo noto e si segna la riga come stimata.
     stimato = False
     if (not rea and riga["direzione"] == "arrivo" and f is not None and not d.get("fermateSoppresse")
-            and (d.get("idDestinazione") == STAZIONE or f is (d.get("fermate") or [None])[-1])
+            and (d.get("idDestinazione") == cod_st or f is (d.get("fermate") or [None])[-1])
             and d.get("provvedimento") in (0, None, "0")):
         rit_ult = d.get("ritardo")
         if isinstance(rit_ult, int) and not isinstance(rit_ult, bool) and d.get("oraUltimoRilevamento"):
@@ -361,8 +419,8 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     nomi_fermate = {_nome_fermata(x) for x in (d.get("fermate") or [])}
     totale = (prov == 1 or str(prov) == "1" or tipo == "ST"
               or bool(nomi_fermate and nomi_fermate <= set(saltate)))
-    bergamo_non_servita = ("BERGAMO" in saltate or bergamo_soppressa(sopp_lista)
-                           or fermata_soppressa(f))
+    bergamo_non_servita = (nome_st in saltate or stazione_soppressa(sopp_lista, cod_st, nome_st)
+                           or fermata_soppressa(f))  # (la stazione monitorata non è servita)
     parziale = (not totale) and (bergamo_non_servita or bool(saltate) or prov == 2 or str(prov) == "2")
     riga["parziale"] = "1" if parziale else ""
     if totale:
@@ -398,6 +456,7 @@ def esegui(adesso=None):
     adesso = adesso or datetime.now(RM)
     adesso_ms = int(adesso.timestamp() * 1000)
     adesso_iso = adesso.replace(microsecond=0).isoformat()
+    _cache_dettagli.clear()
     arch = Archivio()
     oggi = adesso.date()
     arch.righe((oggi - timedelta(days=1)).isoformat())
@@ -405,18 +464,23 @@ def esegui(adesso=None):
 
     # --- 1. tabelle
     nuovi, viste, tabelle_ok = 0, 0, 0
-    for off in OFFSET_TABELLE_MIN:
-        dt = adesso + timedelta(minutes=off)
-        for tipo, direzione in (("partenze", "partenza"), ("arrivi", "arrivo")):
-            dati = tabella(tipo, dt)
-            time.sleep(PAUSA)
-            if dati is None:
-                continue
-            tabelle_ok += 1
-            for item in dati:
-                viste += 1
-                if aggiungi_da_tabella(arch, item, direzione, adesso_iso):
-                    nuovi += 1
+    per_stazione = {}
+    for st in STAZIONI:
+        ok_st = 0
+        for off in OFFSET_TABELLE_MIN:
+            dt = adesso + timedelta(minutes=off)
+            for tipo, direzione in (("partenze", "partenza"), ("arrivi", "arrivo")):
+                dati = tabella(tipo, dt, st["codice"])
+                time.sleep(PAUSA)
+                if dati is None:
+                    continue
+                tabelle_ok += 1
+                ok_st += 1
+                for item in dati:
+                    viste += 1
+                    if aggiungi_da_tabella(arch, item, direzione, adesso_iso, st["codice"]):
+                        nuovi += 1
+        per_stazione[st["nome"]] = ok_st
     if tabelle_ok == 0:
         print("ERRORE: nessuna tabella raggiungibile, niente da salvare.")
         return 1
@@ -480,7 +544,8 @@ def esegui(adesso=None):
             scaduti += 1
 
     file_modificati = arch.salva()
-    print(f"Tabelle lette: {tabelle_ok}/{len(OFFSET_TABELLE_MIN) * 2} | treni visti: {viste} | nuovi: {nuovi} | "
+    print("Tabelle lette per stazione: " + ", ".join(f"{n} {k}/{len(OFFSET_TABELLE_MIN) * 2}" for n, k in per_stazione.items()))
+    print(f"Tabelle lette: {tabelle_ok}/{len(OFFSET_TABELLE_MIN) * 2 * len(STAZIONI)} | treni visti: {viste} | nuovi: {nuovi} | "
           f"dettagli richiesti: {richiesti} | riletture: {ricontrollati} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "
           f"file modificati: {file_modificati}")
     return 0

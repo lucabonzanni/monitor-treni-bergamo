@@ -41,8 +41,9 @@ const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const dm = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 const dmy = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4);
 const dataLunga = iso => cap(new Date(iso + "T12:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
-const nomeStaz = s => (s || "?").toLowerCase().replace(/(^|[\s'’.\-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
-const DIREZ = { partenza: "Partenza", arrivo: "Arrivo", tutte: "Tutte" };
+const nomeStaz = s => (s || "?").toLowerCase().replace(/(^|[\s'’.\-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()).replace("Ponte S.Pietro", "Ponte San Pietro");
+const DIREZ = { partenza: "Partenza", arrivo: "Arrivo", transito: "Transito", tutte: "Tutte" };
+const tratta = r => nomeStaz(r.da || (r.direzione === "partenza" ? "" : r.controparte)) + " → " + nomeStaz(r.a || (r.direzione === "partenza" ? r.controparte : ""));
 const NOMI_CORTI = { "Lunedì": "Lun", "Martedì": "Mar", "Mercoledì": "Mer", "Giovedì": "Gio", "Venerdì": "Ven", "Sabato": "Sab", "Domenica": "Dom" };
 const piccolo = () => window.innerWidth < 600;
 const quando = iso => new Date(iso).toLocaleString("it-IT", { dateStyle: "long", timeStyle: "short" });
@@ -323,30 +324,35 @@ function disegnaOggi() {
     coppie(tile("Soppressioni totali", f0(sop), suCorse(sop), "c3"),
       tile("Soppressioni parziali", f0(par), suCorse(par), "c4"))));
   box.append(el("p", { class: "fonte" }, NOTA_DISS));
-  let soloAnomalie = false, dirTab = "tutti";
+  let soloAnomalie = false, dirTab = "tutti", stazSel = "tutte";
   const wrap = el("div", { class: "sc" });
   const cb = el("input", { type: "checkbox", id: "solo-anom" });
   cb.addEventListener("change", e => { soloAnomalie = e.target.checked; ridisegna(); });
   function ridisegna() {
     const rs = righe.filter(r => (dirTab === "tutti" || r.direzione === dirTab)
+      && (stazSel === "tutte" || (r.stazioni || []).includes(stazSel))
       && (!soloAnomalie || r.stato === "soppresso" || r.parziale || (r.ritardo || 0) >= 5));
     wrap.replaceChildren(el("table", { class: "sx" },
-      el("thead", null, el("tr", null, ["Orario", "Effettivo", "Direzione", "N. treno", "Tratta", "Stato"].map(h => el("th", { text: h })))),
+      el("thead", null, el("tr", null, ["Orario", "Effettivo", "Stazione", "Direzione", "N. treno", "Tratta", "Stato"].map(h => el("th", { text: h })))),
       el("tbody", null, rs.map(r => el("tr", null,
-        el("td", { text: r.orario }), el("td", { text: r.reale || "-" }), el("td", { text: DIREZ[r.direzione] }),
+        el("td", { text: r.orario }), el("td", { text: r.reale || "-" }), el("td", { text: r.stazione || "Bergamo" }), el("td", { text: DIREZ[r.direzione] }),
         el("td", { text: r.numero }),
-        el("td", { text: r.direzione === "partenza" ? "Bergamo → " + nomeStaz(r.controparte) : nomeStaz(r.controparte) + " → Bergamo" }),
+        el("td", { text: tratta(r) }),
         el("td", null, chipStato(statoTreno(r))))))));
   }
   const seg = el("div", { class: "seg", role: "group", "aria-label": "Arrivi e partenze" });
-  [["tutti", "Tutti"], ["arrivo", "Arrivi"], ["partenza", "Partenze"]].forEach(([k, t]) => {
+  [["tutti", "Tutti"], ["arrivo", "Arrivi"], ["partenza", "Partenze"], ["transito", "In transito"]].forEach(([k, t]) => {
     const b = el("button", { type: "button", "aria-pressed": String(k === dirTab), text: t });
     b.addEventListener("click", () => { dirTab = k; [...seg.children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); ridisegna(); });
     seg.append(b);
   });
-  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5' e soppressioni" }), seg));
+  const stazioni = D.stazioni || [];
+  const selStaz = el("select", { id: "sel-staz", "aria-label": "Stazione" }, el("option", { value: "tutte", text: "Tutte le stazioni" }),
+    ...stazioni.map(x => el("option", { value: x.codice, text: x.nome })));
+  selStaz.addEventListener("change", e => { stazSel = e.target.value; ridisegna(); });
+  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5' e soppressioni" }), stazioni.length > 1 ? selStaz : "", seg));
   ridisegna(); box.append(wrap);
-  box.append(el("p", { class: "fonte" }, el("strong", { text: "Nota: " }), "è indicato come “puntuale” il treno con un ritardo inferiore ai 5'." + (righe.some(r => r.stimato && r.stato === "effettuato") ? " “Stima”: ritardo stimato dall'ultimo rilevamento disponibile, perché ViaggiaTreno non ha registrato l'arrivo a Bergamo." : "")));
+  box.append(el("p", { class: "fonte" }, el("strong", { text: "Nota: " }), "è indicato come “puntuale” il treno con un ritardo inferiore ai 5'." + (righe.some(r => r.stimato && r.stato === "effettuato") ? " “Stima”: ritardo stimato dall'ultimo rilevamento disponibile, perché ViaggiaTreno non ha registrato l'arrivo nella stazione." : "") + " Ogni treno compare una sola volta, anche se passa da più stazioni: la colonna “Stazione” indica quella a cui è riferito il dato; “In transito” sono i treni che non hanno capolinea nella stazione indicata. Il filtro per stazione mostra i treni che passano da quella stazione."));
   const acc = (D.ritardi_accumulati || {})[giorno];
   if (acc) {
     box.append(el("div", { class: "accumulo" },
@@ -441,7 +447,7 @@ function disegnaPeriodo() {
   });
   scDir = scheda(ids[2], {
     id: "g-direttrici", titolo: "Disservizi per direttrice", legenda: true, controlli: el("div", { class: "controls" }, seg),
-    desc: "Raggruppate per capolinea; per Bergamo-Milano si distingue tra via Pioltello e via Carnate. Le direttrici si definiscono nel file config/direttrici.csv.",
+    desc: "Raggruppate per i due capolinea del treno; per Bergamo-Milano si distingue tra via Pioltello e via Carnate. Le direttrici si definiscono nel file config/direttrici.csv.",
     disegna: plot => { const r = righeDir(); r.length ? barreOrizzontali(plot, r) : messaggio(plot, "Nessuna corsa per questa selezione."); },
     tabella: () => ({
       sx: false,
@@ -476,7 +482,8 @@ function disegnaTreni(box, treni) {
   const info = el("p", { class: "desc" });
   const campi = [
     ["numero", "N. treno", false, t => t.numero],
-    ["controparte", "Tratta", false, t => t.direzione === "partenza" ? "Bergamo → " + nomeStaz(t.controparte) : nomeStaz(t.controparte) + " → Bergamo"],
+    ["controparte", "Tratta", false, t => tratta(t)],
+    ["stazione", "Stazione", false, t => t.stazione || "Bergamo"],
     ["direttrice", "Direttrice", false, t => t.direttrice],
     ["orario", "Orario", false, t => t.orario], ["programmate", "Corse", true, t => f0(t.programmate)], ["ritardo_medio", "Ritardo medio (′)", true, t => f1(t.ritardo_medio)],
     ["pct_ritardi_5", "% ritardi di almeno 5'", true, t => fp(t.pct_ritardi_5)], ["n_ritardi_15", "Ritardi di almeno 15'", true, t => f0(t.n_ritardi_15)],
@@ -484,7 +491,7 @@ function disegnaTreni(box, treni) {
     ["sopp_parziali", "Soppressioni parziali", true, t => f0(t.sopp_parziali)], ["pct_sopp_parziali", "% soppresse in parte", true, t => fp(t.pct_sopp_parziali)]];
   function ridisegna() {
     const q = cerca.trim().toUpperCase();
-    const rs = treni.filter(t => t.programmate >= minimo && (!q || (t.numero + " " + (t.controparte || "") + " " + t.direttrice).toUpperCase().includes(q)));
+    const rs = treni.filter(t => t.programmate >= minimo && (!q || (t.numero + " " + (t.da || "") + " " + (t.a || "") + " " + (t.controparte || "") + " " + t.direttrice).toUpperCase().includes(q)));
     rs.sort((a, b) => {
       const x = a[ordine], y = b[ordine]; if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
       return (typeof x === "string" ? x.localeCompare(y, "it", { numeric: true }) : x - y) * verso;
@@ -507,7 +514,7 @@ function disegnaTreni(box, treni) {
   const sel = el("select", { "aria-label": "Corse minime" }, [1, 3, 5, 10, 20].map(n => el("option", { value: n, text: n + " corse", selected: n === minimo ? true : null })));
   sel.addEventListener("change", e => { minimo = +e.target.value; mostra = 25; ridisegna(); });
   sec.append(el("h3", { text: "Ritardi e soppressioni di ciascun treno" }),
-    el("p", { class: "desc", text: "Un treno è identificato da numero e direzione. Il ritardo medio considera i treni in anticipo come puntuali. A metà dicembre, con il cambio d'orario, molti numeri cambiano: lo storico si interrompe." }),
+    el("p", { class: "desc", text: "Un treno è identificato dal suo numero. Il ritardo medio considera i treni in anticipo come puntuali. A metà dicembre, con il cambio d'orario, molti numeri cambiano: lo storico si interrompe." }),
     el("div", { class: "controls" }, ricerca, el("label", null, "Almeno ", sel)), info, corpo, mpiu,
     el("p", { class: "fonte" }, el("strong", { text: "Fonte: " }), FONTE));
   box.append(sec);
@@ -519,12 +526,12 @@ function disegnaDati() {
   const files = D.file_giornalieri || [];
   box.append(el("p", { class: "lead", text: "Tutti i dati raccolti sono liberamente scaricabili in formato .csv, per rielaborarli." }),
     el("ul", { class: "dl" },
-      el("li", null, el("a", { href: "dati/corse_complete.csv", text: "corse_complete.csv" }), ": tutte le corse registrate, una riga per treno e direzione."),
+      el("li", null, el("a", { href: "dati/corse_complete.csv", text: "corse_complete.csv" }), ": tutte le corse registrate, una riga per treno, stazione e direzione (un treno che passa da più stazioni compare in più righe; nel portale è contato una sola volta)."),
       el("li", null, el("a", { href: "dati/riepilogo.json", text: "riepilogo.json" }), ": gli indicatori calcolati, usati da questa pagina.")),
     el("details", null,
       el("summary", { text: files.length === 1 ? "File giornalieri (ultimo giorno)" : "File giornalieri (ultimi " + files.length + " giorni)" }),
       el("div", { class: "files" }, files.slice().reverse().map(d => el("div", null, el("a", { href: `dati/corse/${d}.csv`, text: d + ".csv" })))),
-      el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, parziale = soppressione parziale con Bergamo non servita, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); parziale (1 = soppressione parziale); stimato (1 = ritardo stimato dall'ultimo rilevamento); fermate_soppresse (fermate non effettuate, separate da |); motivo_ritardo. Citare: “elaborazione di Luca Bonzanni su dati ViaggiaTreno”.")),
+      el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; stazione (codice della stazione monitorata a cui si riferisce la riga); direzione (partenza o arrivo dalla stazione); numero_treno; controparte (capolinea di origine o destinazione); origine e destinazione (capolinea della corsa, quando disponibili); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, parziale = soppressione parziale con la stazione non servita, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); parziale (1 = soppressione parziale); stimato (1 = ritardo stimato dall'ultimo rilevamento); fermate_soppresse (fermate non effettuate, separate da |); motivo_ritardo. Citare: “elaborazione di Luca Bonzanni su dati ViaggiaTreno”.")),
     el("p", { class: "fonte" }, "Il codice che raccoglie ed elabora i dati è pubblico: ", el("a", { href: "https://github.com/lucabonzanni/monitor-treni-bergamo", text: "codice e dati su GitHub" }), "."));
 }
 
@@ -532,15 +539,16 @@ function disegnaMetodologia() {
   const nc = D.controparti_non_classificate || [];
   const voci = [
     ["Fonte", "I dati arrivano dal sistema pubblico ViaggiaTreno (Rfi/Trenitalia), che raccoglie anche i treni regionali Trenord. Non è un'Api ufficialmente documentata (può cambiare o interrompersi senza preavviso)."],
-    ["Cosa misuriamo", "Per ogni treno in partenza o in arrivo a Bergamo, viene misurata la differenza tra l'orario programmato e quello reale registrato nella stazione di Bergamo (per le partenze conta l'orario di partenza, per gli arrivi l'orario di arrivo)."],
+    ["Stazioni monitorate", "Il portale segue i treni regionali che toccano le stazioni di " + ((D.stazioni || []).map(x => x.nome).join(", ") || "Bergamo") + ", per avere un quadro dei treni della Bergamasca. Sono esclusi Frecce, Intercity, Euronight e gli altri treni a lunga percorrenza. Ogni corsa è contata una sola volta, anche se passa da più stazioni monitorate o compare sia in arrivo sia in partenza: il dato è quello della stazione con priorità più alta (nell'ordine: Bergamo, Treviglio, Ponte San Pietro), salvo che in quella stazione non sia disponibile."],
+    ["Cosa misuriamo", "Per ogni treno che parte, arriva o transita in una stazione monitorata, viene misurata la differenza tra l'orario programmato e quello reale registrato in quella stazione (per le partenze conta l'orario di partenza, per gli arrivi e i transiti l'orario di arrivo)."],
     ["Ritardo e puntualità", "Vengono segnalati i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Un treno in anticipo viene considerato comunque come puntuale."],
-    ["Soppressioni", "Sono indicate come soppressioni totali solo le corse interamente non eseguite. Sono soppressioni parziali le corse che partono da una stazione diversa o terminano in una stazione diversa dal previsto (per esempio un Bergamo-Milano Centrale che parte da Treviglio Ovest invece che da Bergamo, o che termina a Verdello Dalmine): sono comunque un disservizio per chi viaggia da Bergamo. Le soppressioni parziali sono conteggiate a parte. Se la corsa passa comunque da Bergamo, il suo ritardo entra nel calcolo; se Bergamo non è servita, non c'è nessun orario da misurare. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
+    ["Soppressioni", "Sono indicate come soppressioni totali solo le corse interamente non eseguite. Sono soppressioni parziali le corse che partono da una stazione diversa o terminano in una stazione diversa dal previsto (per esempio un Bergamo-Milano Centrale che parte da Treviglio Ovest invece che da Bergamo, o che termina a Verdello Dalmine): sono comunque un disservizio per chi viaggia. Le soppressioni parziali sono conteggiate a parte. Se la corsa passa comunque dalla stazione monitorata, il suo ritardo entra nel calcolo; se la stazione non è servita, non c'è nessun orario da misurare. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
     ["Incidenza dei disservizi", "Somma le corse con ritardo di almeno 15 minuti, le soppressioni totali e le soppressioni parziali, rapportata alle corse monitorate. Ogni corsa è contata una sola volta, anche se ha più di un problema."],
-    ["Ritardi accumulati", "Sotto il tabellone di giornata compare la somma dei minuti di ritardo accumulati dai treni (non i minuti persi dai singoli passeggeri). Nella riga “Solo ritardi” si sommano i ritardi delle corse effettuate: contano i ritardi di almeno 2 minuti, perché un solo minuto potrebbe essere un arrotondamento, e gli anticipi valgono zero, senza compensare i ritardi. Nella riga “Ritardi + soppressioni” si aggiunge, per ogni soppressione totale o parziale senza passaggio a Bergamo, l'attesa tra l'orario programmato della corsa soppressa e il passaggio della corsa successiva della stessa tratta (stessa direzione e stesso capolinea). L'ultima corsa della giornata di ogni tratta non ha una successiva e non è conteggiata. Per la giornata in corso il dato è provvisorio."],
+    ["Ritardi accumulati", "Sotto il tabellone di giornata compare la somma dei minuti di ritardo accumulati dai treni (non i minuti persi dai singoli passeggeri). Nella riga “Solo ritardi” si sommano i ritardi delle corse effettuate: contano i ritardi di almeno 2 minuti, perché un solo minuto potrebbe essere un arrotondamento, e gli anticipi valgono zero, senza compensare i ritardi. Nella riga “Ritardi + soppressioni” si aggiunge, per ogni soppressione totale o parziale senza passaggio nella stazione, l'attesa tra l'orario programmato della corsa soppressa e il passaggio della corsa successiva della stessa tratta (stessa stazione, stessa direzione e stesso capolinea). L'ultima corsa della giornata di ogni tratta non ha una successiva e non è conteggiata. Per la giornata in corso il dato è provvisorio."],
     ["Giorni lavorativi e fine settimana", "Quando i dati coprono almeno due settimane, il quadro complessivo si può restringere ai giorni lavorativi (lunedì-venerdì) o al fine settimana (sabato e domenica). Le festività infrasettimanali sono contate in base al giorno della settimana."],
     ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (tutte quelle previste, con dato rilevato). Questo vale sia per la sezione di oggi sia per il quadro complessivo. Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte: il loro numero compare sotto i numeri del quadro quando ce ne sono."],
-    ["Copertura", "La rilevazione è iniziata " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + " (non esiste uno storico precedente a tale data). Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione. Se ViaggiaTreno perde un treno nell'ultima stazione prima di Bergamo e la corsa, che ha Bergamo come capolinea, non risulta soppressa, dopo 30 minuti dall'arrivo atteso il ritardo viene stimato dall'ultimo rilevamento disponibile (colonna stimato nel file .csv)."],
-    ["Direttrici", "Le corse sono raggruppate per capolinea (per esempio “Milano” comprende Centrale e Porta Garibaldi). Per Bergamo-Milano si distingue tra via Pioltello (treni che fermano a Treviglio o Pioltello) e via Carnate (treni che fermano a Carnate o Paderno d'Adda), in base alle fermate intermedie registrate da ViaggiaTreno. Le regole si modificano in config/direttrici.csv e si applicano a tutto lo storico." + (nc.length ? " Capolinea non ancora assegnati: " + nc.slice(0, 8).map(x => nomeStaz(x[0]) + " (" + x[1] + ")").join(", ") + "." : "")],
+    ["Copertura", "La rilevazione è iniziata " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + (D.stazioni && D.stazioni.length > 1 ? " per Bergamo; " + D.stazioni.slice(1).map(x => x.nome + " è monitorata dal " + dataLunga(x.data_inizio).toLowerCase()).join(", ") + ": con l'ingresso di nuove stazioni, i dati complessivi cambiano definizione e i confronti con i giorni precedenti vanno fatti con cautela" : "") + " (non esiste uno storico precedente a tali date). Il servizio ferroviario tra Ponte San Pietro e Bergamo è sostituito da autobus: finché dura, i treni da Lecco e da Milano via Carnate si fermano a Ponte San Pietro e compaiono solo nei dati di quella stazione. Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione. Se ViaggiaTreno perde un treno nell'ultima stazione prima di quella monitorata e la corsa, che ha la stazione come capolinea, non risulta soppressa, dopo 30 minuti dall'arrivo atteso il ritardo viene stimato dall'ultimo rilevamento disponibile (colonna stimato nel file .csv)."],
+    ["Direttrici", "Le corse sono raggruppate per i loro due capolinea (per esempio “Milano” comprende Centrale e Porta Garibaldi), indipendentemente dalla stazione monitorata in cui sono state rilevate. Per Bergamo-Milano si distingue tra via Pioltello (treni che fermano a Treviglio o Pioltello) e via Carnate (treni che fermano a Carnate o Paderno d'Adda), in base alle fermate intermedie registrate da ViaggiaTreno. Le regole si modificano in config/direttrici.csv e si applicano a tutto lo storico." + (nc.length ? " Capolinea non ancora assegnati: " + nc.slice(0, 8).map(x => x[0].split(" → ").map(nomeStaz).join(" → ") + " (" + x[1] + ")").join(", ") + "." : "")],
     ["Aggiornamento", "La raccolta parte automaticamente circa ogni 15 minuti; gli avvii possono subire ritardi, quindi i dati più recenti possono arrivare con qualche minuto di scarto. Ultimo aggiornamento dei dati: " + (D.aggiornato_il ? quando(D.aggiornato_il) : "-") + "."],
     ["Interpretazione", "Le medie su pochi giorni risentono di singoli eventi (scioperi, guasti, lavori). Le tabelle indicano sempre il numero di corse su cui si basa ogni valore."]
   ];
