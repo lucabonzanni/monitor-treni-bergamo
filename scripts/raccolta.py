@@ -21,6 +21,7 @@ import re
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
@@ -64,6 +65,12 @@ CAMPI_CONFRONTO = ["orario_reale", "ritardo_min", "stato", "provvedimento", "tip
                    "origine", "destinazione"]
 
 _base_ok = None
+_rifiuti_403 = 0          # richieste consecutive rifiutate con "403 Forbidden"
+MAX_RIFIUTI_403 = 4       # oltre questa soglia ci fermiamo: ViaggiaTreno sta bloccando questo giro
+
+
+class Bloccato(Exception):
+    """ViaggiaTreno rifiuta le richieste (403): inutile insistere in questo giro."""
 _cache_dettagli = {}
 
 
@@ -87,8 +94,9 @@ NOME_VT = {x["codice"]: x["nome_vt"] for x in STAZIONI}
 
 # ------------------------------------------------------------------ rete
 def chiedi(percorso):
-    """Scarica un indirizzo di ViaggiaTreno. Restituisce il testo, o None se non risponde."""
-    global _base_ok
+    """Scarica un indirizzo di ViaggiaTreno. Restituisce il testo, o None se non risponde.
+    Dopo alcuni rifiuti 403 consecutivi solleva Bloccato, per non insistere (e non appesantire il servizio)."""
+    global _base_ok, _rifiuti_403
     basi = ([_base_ok] if _base_ok else []) + [b for b in BASI if b != _base_ok]
     ultimo = "nessuna risposta"
     for base in basi:
@@ -101,8 +109,16 @@ def chiedi(percorso):
                 with urllib.request.urlopen(req, timeout=30) as r:
                     if r.status == 200:
                         _base_ok = base
+                        _rifiuti_403 = 0
                         return r.read().decode("utf-8", "replace")
                     ultimo = f"HTTP {r.status}"
+            except urllib.error.HTTPError as e:
+                ultimo = f"HTTPError: {e}"
+                if e.code == 403:  # rifiuto esplicito: non si riprova subito
+                    _rifiuti_403 += 1
+                    if _rifiuti_403 >= MAX_RIFIUTI_403:
+                        raise Bloccato(ultimo)
+                    break
             except Exception as e:  # noqa: BLE001
                 ultimo = f"{type(e).__name__}: {e}"
             time.sleep(1.5)
@@ -552,4 +568,9 @@ def esegui(adesso=None):
 
 
 if __name__ == "__main__":
-    sys.exit(esegui())
+    try:
+        sys.exit(esegui())
+    except Bloccato as e:
+        # ViaggiaTreno rifiuta temporaneamente le richieste da questo indirizzo: niente da salvare, si riprova al prossimo giro
+        print(f"ATTENZIONE: ViaggiaTreno ha rifiutato le richieste ({e}). Giro saltato, nessun dato modificato.")
+        sys.exit(0)
