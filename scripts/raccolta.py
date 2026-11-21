@@ -258,6 +258,14 @@ def _nome_fermata(x):
     return str(x).strip().upper()
 
 
+def fermata_soppressa(f):
+    """True se la fermata risulta soppressa (actualFermataType = 3), sia che il valore arrivi come numero sia come testo."""
+    try:
+        return int(str((f or {}).get("actualFermataType")).strip()) == 3
+    except (ValueError, TypeError):
+        return False
+
+
 def fermate_saltate(d):
     """Nomi delle fermate (diverse da Bergamo) che la corsa non effettua: dall'elenco fermateSoppresse
     e dalle fermate con actualFermataType = 3 (soppressa)."""
@@ -267,7 +275,7 @@ def fermate_saltate(d):
         if n:
             nomi.append(n)
     for f in d.get("fermate") or []:
-        if f.get("actualFermataType") == 3:
+        if fermata_soppressa(f):
             n = _nome_fermata(f)
             if n:
                 nomi.append(n)
@@ -354,7 +362,7 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     totale = (prov == 1 or str(prov) == "1" or tipo == "ST"
               or bool(nomi_fermate and nomi_fermate <= set(saltate)))
     bergamo_non_servita = ("BERGAMO" in saltate or bergamo_soppressa(sopp_lista)
-                           or bool(f and f.get("actualFermataType") == 3))
+                           or fermata_soppressa(f))
     parziale = (not totale) and (bergamo_non_servita or bool(saltate) or prov == 2 or str(prov) == "2")
     riga["parziale"] = "1" if parziale else ""
     if totale:

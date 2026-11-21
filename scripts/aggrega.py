@@ -28,6 +28,7 @@ SOGLIA = 5    # minuti: "ritardo" (da almeno 5')
 GRAVE = 15    # minuti: "ritardo grave" (da almeno 15')
 ALTRE = "Altre direttrici"
 DATA_INIZIO = os.environ.get("DATA_INIZIO", "2026-11-20")  # prima giornata piena di rilevazione
+SOGLIA_ACCUMULO = 2  # minuti: un ritardo di 1' può essere un arrotondamento, quindi non entra nei ritardi accumulati
 GIORNI_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 
 
@@ -101,6 +102,7 @@ def statistiche(rows):
         "disservizi": len(diss),
         "pct_disservizi": pct(len(diss), prog),
         "nd": len(nd),
+        "stimate": sum(1 for r in eff if r.get("stimato") == "1"),
         "ritardo_medio": round(statistics.mean(rit), 1) if rit else None,
         "ritardo_mediano": round(statistics.median(rit), 1) if rit else None,
         "ritardo_max": max(rit) if rit else None,
@@ -113,6 +115,38 @@ def statistiche(rows):
     }
 
 
+def accumulo(rows_giorno):
+    """Minuti di ritardo accumulati dai treni in una giornata.
+    - solo_ritardi: somma dei ritardi delle corse effettuate (da 2' in su; gli anticipi valgono zero e non compensano nulla).
+    - attesa: per ogni corsa soppressa (totale, o parziale senza passaggio a Bergamo) i minuti tra il suo orario
+      programmato e il passaggio della corsa successiva della stessa tratta (stessa direzione e stesso capolinea).
+      L'ultima corsa della giornata di ogni tratta non ha successiva e non viene conteggiata."""
+    def ritardo_valido(r):
+        return r["_rit"] if (r["stato"] == "effettuato" and r["_rit"] is not None and r["_rit"] >= SOGLIA_ACCUMULO) else 0
+
+    solo = sum(ritardo_valido(r) for r in rows_giorno)
+    corse_ritardo = sum(1 for r in rows_giorno if ritardo_valido(r) > 0)
+    attesa, n_attese, esclusi, provvisorio = 0, 0, 0, False
+    tratte = raggruppa(rows_giorno, lambda r: (r["direzione"], (r.get("controparte") or "").upper()))
+    for gr in tratte.values():
+        gr = sorted(gr, key=lambda r: r["_ts"])
+        for i, r in enumerate(gr):
+            if r["stato"] not in ("soppresso", "parziale"):
+                continue
+            succ = next((x for x in gr[i + 1:] if x["stato"] in ("effettuato", "in_corso", "programmato")), None)
+            if succ is None:
+                esclusi += 1
+                continue
+            ts_succ = succ["_ts"] + ritardo_valido(succ) * 60000
+            attesa += max(0, round((ts_succ - r["_ts"]) / 60000))
+            n_attese += 1
+            if succ["stato"] != "effettuato":
+                provvisorio = True  # il successivo non è ancora passato: l'attesa è calcolata sull'orario programmato
+    return {"solo_ritardi": solo, "corse_ritardo": corse_ritardo, "attesa_soppressioni": attesa,
+            "soppresse_con_attesa": n_attese, "soppresse_senza_successivo": esclusi,
+            "totale": solo + attesa, "provvisorio": provvisorio}
+
+
 def raggruppa(rows, chiave):
     gruppi = defaultdict(list)
     for r in rows:
@@ -120,8 +154,9 @@ def raggruppa(rows, chiave):
     return gruppi
 
 
-def blocco(rows, oggi, regole):
-    """Tutti i numeri per un periodo (rows = corse del periodo)."""
+def blocco(rows, oggi, regole, giorni_attesi=None):
+    """Tutti i numeri per un periodo (rows = corse del periodo).
+    giorni_attesi: elenco delle date che dovrebbero avere dati; quelle senza righe compaiono come "senza_dati"."""
     rows = [r for r in rows if r["stato"] in ("effettuato", "soppresso", "parziale", "nd")]
     per_giorno = raggruppa(rows, lambda r: r["data"])
     giorni = []
@@ -130,6 +165,14 @@ def blocco(rows, oggi, regole):
         s["data"] = g
         s["parziale"] = (g == oggi)
         giorni.append(s)
+    for g in (giorni_attesi or []):
+        if g not in per_giorno:
+            s = statistiche([])
+            s["data"] = g
+            s["parziale"] = (g == oggi)
+            s["senza_dati"] = True
+            giorni.append(s)
+    giorni.sort(key=lambda s: s["data"])
 
     chiuse = [r for r in rows if r["data"] != oggi]  # il giorno in corso è parziale
     dow = []
@@ -213,9 +256,24 @@ def main():
         limite = (oggi_d - timedelta(days=n_giorni - 1)).isoformat()
         return [r for r in righe if r["data"] >= limite]
 
+    def attesi(n_giorni=None):
+        """Date comprese tra la prima giornata con dati e ieri (o l'ultima con dati): quelle senza righe sono buchi."""
+        if not date_con_dati:
+            return []
+        inizio = datetime.fromisoformat(date_con_dati[0]).date()
+        if n_giorni:
+            inizio = max(inizio, oggi_d - timedelta(days=n_giorni - 1))
+        fine = max(datetime.fromisoformat(date_con_dati[-1]).date(), oggi_d - timedelta(days=1))
+        fine = min(fine, oggi_d)
+        out, g = [], inizio
+        while g <= fine:
+            out.append(g.isoformat())
+            g += timedelta(days=1)
+        return out
+
     periodi = {}
-    for chiave, rr in (("tutto", righe), ("30", da(30)), ("7", da(7))):
-        periodi[chiave] = blocco(rr, oggi, regole)
+    for chiave, rr, n in (("tutto", righe, None), ("30", da(30), 30), ("7", da(7), 7)):
+        periodi[chiave] = blocco(rr, oggi, regole, attesi(n))
         # giorni lavorativi (lunedì-venerdì) e fine settimana (sabato-domenica)
         periodi[chiave + "_lav"] = blocco([r for r in rr if r["_dow"] < 5], oggi, regole)
         periodi[chiave + "_we"] = blocco([r for r in rr if r["_dow"] >= 5], oggi, regole)
@@ -230,9 +288,13 @@ def main():
                     "controparte": r["controparte"], "direttrice": direttrice(r["controparte"], regole, r.get("via")),
                     "stato": r["stato"], "ritardo": r["_rit"], "motivo": r["motivo_ritardo"],
                     "parziale": r.get("parziale") == "1",
+                    "stimato": r.get("stimato") == "1",
                     "saltate": [x for x in (r.get("fermate_soppresse") or "").split("|") if x and not x.startswith("[")],
                 })
         return out
+
+    per_data = raggruppa(righe, lambda r: r["data"])
+    ritardi_accumulati = {g: accumulo(rr) for g, rr in per_data.items()}
 
     ieri = (oggi_d - timedelta(days=1)).isoformat()
     lista_oggi = elenco(oggi)
@@ -250,6 +312,7 @@ def main():
         "giorni_con_dati": len(date_con_dati),
         "soglie": {"ritardo": SOGLIA, "ritardo_grave": GRAVE},
         "periodi": periodi,
+        "ritardi_accumulati": ritardi_accumulati,
         "oggi_elenco": lista_oggi,
         "ieri": ieri,
         "ieri_elenco": lista_ieri,

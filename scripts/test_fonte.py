@@ -6,6 +6,7 @@ Interroga ViaggiaTreno per la stazione di Bergamo e scrive in test_output/:
 Usa solo librerie standard di Python. Non scrive niente fuori da test_output/.
 """
 import json
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -18,7 +19,7 @@ BASI = [
     "https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno/",
     "https://www.viaggiatreno.it/infomobilitamobile/resteasy/viaggiatreno/",
 ]
-CODICE_BERGAMO_IPOTIZZATO = "S01520"
+CODICE_BERGAMO_IPOTIZZATO = "S01529"
 USCITA = Path("test_output")
 RM = ZoneInfo("Europe/Rome")
 righe = []  # il report
@@ -185,3 +186,4 @@ if __name__ == "__main__":
         (USCITA / "report.md").write_text(
             "\n".join(righe) + f"\n\nERRORE IMPREVISTO: {type(e).__name__}: {e}\n", encoding="utf-8")
         print("ERRORE:", e)
+        sys.exit(1)  # il report resta salvato, ma l'esecuzione risulta fallita e GitHub lo segnala

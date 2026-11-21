@@ -28,6 +28,15 @@ const nf0 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
 const f1 = v => v == null ? "n.d." : nf1.format(v);
 const f0 = v => v == null ? "n.d." : nf0.format(v);
 const fp = v => v == null ? "n.d." : nf1.format(v) + "%";
+const pl = (n, sing, plur) => n === 1 ? sing : plur;
+const orem = m => { m = Math.round(m || 0); const h = Math.floor(m / 60), r = m % 60;
+  if (!h) return r + " min"; return h + (h === 1 ? " ora" : " ore") + (r ? " " + r + " min" : ""); };
+function spezza(t, max) {
+  const out = []; let cur = "";
+  for (const p of String(t).split(" ")) { if (cur && (cur + " " + p).length > max) { out.push(cur); cur = p; } else cur = cur ? cur + " " + p : p; }
+  if (cur) out.push(cur);
+  return out.length > 1 ? out : t;
+}
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const dm = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 const dmy = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4);
@@ -124,7 +133,7 @@ function lineaAndamento(plot, gg) {
         legend: { display: false }, crosshair: { on: true },
         tooltip: tooltipBase({
           callbacks: {
-            title: items => items.length ? dataLunga(gg[items[0].dataIndex].data) + (gg[items[0].dataIndex].parziale ? " (in corso)" : "") : "",
+            title: items => items.length ? dataLunga(gg[items[0].dataIndex].data) + (gg[items[0].dataIndex].senza_dati ? " (nessun dato)" : gg[items[0].dataIndex].parziale ? " (in corso)" : "") : "",
             label: it => " " + it.dataset.label + ": " + testoValore(gg[it.dataIndex], LEG[it.datasetIndex])
           }
         })
@@ -169,7 +178,7 @@ function barreOrizzontali(plot, righe) {
     borderRadius: 4, borderSkipped: "start", maxBarThickness: 14
   }));
   disegnaGrafico("direttrici", plot, {
-    type: "bar", data: { labels: righe.map(r => r.direttrice), datasets: ds },
+    type: "bar", data: { labels: righe.map(r => piccolo() ? spezza(r.direttrice, 16) : r.direttrice), datasets: ds },
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { right: 8, top: 4 } },
       interaction: { mode: "index", axis: "y", intersect: false },
@@ -180,7 +189,7 @@ function barreOrizzontali(plot, righe) {
           callbacks: {
             title: items => items.length ? righe[items[0].dataIndex].direttrice : "",
             label: it => " " + it.dataset.label + ": " + fp(it.parsed.x),
-            afterBody: items => items.length ? [f0(righe[items[0].dataIndex].programmate) + " corse programmate"] : []
+            afterBody: items => items.length ? [f0(righe[items[0].dataIndex].programmate) + " " + pl(righe[items[0].dataIndex].programmate, "corsa programmata", "corse programmate")] : []
           }
         })
       },
@@ -259,6 +268,11 @@ function scheda(box, o) {
 
 /* ---------- stato dei treni di oggi ---------- */
 function statoTreno(r) {
+  const s = statoBase(r);
+  if (r.stimato && r.stato === "effettuato" && !(r.parziale)) s.testo += " (stima)";
+  return s;
+}
+function statoBase(r) {
   if (r.stato === "soppresso") return { testo: "Soppresso", colore: "var(--c3)", ico: "✕" };
   if (r.stato === "nd") return { testo: "Dato non disponibile", colore: "var(--muted)", ico: "?" };
   if (r.parziale && (r.stato === "parziale" || r.stato === "effettuato")) return { testo: "Soppressione parziale", colore: "var(--c4)", ico: "◐" };
@@ -299,22 +313,23 @@ function disegnaOggi() {
   const attesi = righe.filter(r => r.stato === "programmato" || r.stato === "in_corso").length;
   const prog = eff.length + sop + parFuori, rilevati = prog;
   const diss = righe.filter(r => r.stato === "soppresso" || (r.parziale && (r.stato === "effettuato" || r.stato === "parziale")) || (r.stato === "effettuato" && (r.ritardo || 0) >= 15)).length;
-  const sulRilevati = n => rilevati ? fp(100 * n / rilevati) + " delle corse monitorate" : "";
-  const suCorse = n => prog ? `su ${f0(prog)} corse (${fp(100 * n / prog)})` : "";
+  const sulleEffettuate = n => eff.length ? fp(100 * n / eff.length) + " delle corse effettuate" : "";
+  const suCorse = n => prog ? `su ${f0(prog)} ${pl(prog, "corsa", "corse")} (${fp(100 * n / prog)})` : "";
   box.append(el("section", { class: "kpis" },
-    coppie(tile("Corse monitorate", f0(rilevati), attesi ? `${f0(attesi)} ancora attese` : ""),
-      tile("Incidenza dei disservizi*", rilevati ? fp(100 * diss / rilevati) : "n.d.", `${f0(diss)} su ${f0(rilevati)} corse`, "diss")),
-    coppie(tile("Con ritardo di almeno 5'", f0(rit5), sulRilevati(rit5), "c1"),
-      tile("Con ritardo di almeno 15'", f0(rit15), sulRilevati(rit15), "c2")),
+    coppie(tile("Corse monitorate", f0(rilevati), attesi ? `${f0(attesi)} ${pl(attesi, "ancora attesa", "ancora attese")}` : ""),
+      tile("Incidenza dei disservizi*", rilevati ? fp(100 * diss / rilevati) : "n.d.", `${f0(diss)} su ${f0(rilevati)} ${pl(rilevati, "corsa", "corse")}`, "diss")),
+    coppie(tile("Con ritardo di almeno 5'", f0(rit5), sulleEffettuate(rit5), "c1"),
+      tile("Con ritardo di almeno 15'", f0(rit15), sulleEffettuate(rit15), "c2")),
     coppie(tile("Soppressioni totali", f0(sop), suCorse(sop), "c3"),
       tile("Soppressioni parziali", f0(par), suCorse(par), "c4"))));
   box.append(el("p", { class: "fonte" }, NOTA_DISS));
-  let soloAnomalie = false;
+  let soloAnomalie = false, dirTab = "tutti";
   const wrap = el("div", { class: "sc" });
   const cb = el("input", { type: "checkbox", id: "solo-anom" });
   cb.addEventListener("change", e => { soloAnomalie = e.target.checked; ridisegna(); });
   function ridisegna() {
-    const rs = righe.filter(r => !soloAnomalie || r.stato === "soppresso" || r.parziale || (r.ritardo || 0) >= 5);
+    const rs = righe.filter(r => (dirTab === "tutti" || r.direzione === dirTab)
+      && (!soloAnomalie || r.stato === "soppresso" || r.parziale || (r.ritardo || 0) >= 5));
     wrap.replaceChildren(el("table", { class: "sx" },
       el("thead", null, el("tr", null, ["Orario", "Effettivo", "Direzione", "N. treno", "Tratta", "Stato"].map(h => el("th", { text: h })))),
       el("tbody", null, rs.map(r => el("tr", null,
@@ -323,9 +338,24 @@ function disegnaOggi() {
         el("td", { text: r.direzione === "partenza" ? "Bergamo → " + nomeStaz(r.controparte) : nomeStaz(r.controparte) + " → Bergamo" }),
         el("td", null, chipStato(statoTreno(r))))))));
   }
-  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5' e soppressioni" })));
+  const seg = el("div", { class: "seg", role: "group", "aria-label": "Arrivi e partenze" });
+  [["tutti", "Tutti"], ["arrivo", "Arrivi"], ["partenza", "Partenze"]].forEach(([k, t]) => {
+    const b = el("button", { type: "button", "aria-pressed": String(k === dirTab), text: t });
+    b.addEventListener("click", () => { dirTab = k; [...seg.children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); ridisegna(); });
+    seg.append(b);
+  });
+  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5' e soppressioni" }), seg));
   ridisegna(); box.append(wrap);
-  box.append(el("p", { class: "fonte" }, el("strong", { text: "Nota: " }), "è indicato come “puntuale” il treno con un ritardo inferiore ai 5'."));
+  box.append(el("p", { class: "fonte" }, el("strong", { text: "Nota: " }), "è indicato come “puntuale” il treno con un ritardo inferiore ai 5'." + (righe.some(r => r.stimato && r.stato === "effettuato") ? " “Stima”: ritardo stimato dall'ultimo rilevamento disponibile, perché ViaggiaTreno non ha registrato l'arrivo a Bergamo." : "")));
+  const acc = (D.ritardi_accumulati || {})[giorno];
+  if (acc) {
+    box.append(el("div", { class: "accumulo" },
+      el("h4", { text: "Ritardi accumulati dai treni" + (giornoOggi ? " (giornata in corso, dato provvisorio)" : "") }),
+      el("div", { class: "righe" },
+        el("div", { class: "riga" }, el("span", { class: "t", text: "Solo ritardi" }), el("span", { class: "v", text: orem(acc.solo_ritardi) })),
+        el("div", { class: "riga" }, el("span", { class: "t", text: "Ritardi + soppressioni" }), el("span", { class: "v", text: orem(acc.totale) }))),
+      el("p", { class: "fonte" }, "Somma dei ritardi di almeno 2' delle corse effettuate (gli anticipi non contano). Nella seconda riga si aggiunge, per ogni soppressione, l'attesa fino alla corsa successiva della stessa tratta (escluso l'ultimo treno della giornata). Dettagli nella Metodologia.")));
+  }
   box.append(el("p", { class: "fonte" }, el("strong", { text: "Fonte: " }), FONTE));
 }
 
@@ -362,23 +392,25 @@ function disegnaPeriodo() {
   if (D.giorni_con_dati < 14)
     avviso.append(el("div", { class: "alert", text: `Dati raccolti da ${D.giorni_con_dati} giorn${D.giorni_con_dati === 1 ? "o" : "i"}: i confronti per giorno della settimana, direttrice e singolo treno diventano significativi dopo alcune settimane di osservazioni. Passando il cursore sui grafici compare un'etichetta con il numero di corse su cui si basa ogni valore; le tabelle riportano gli stessi dati.` }));
   kpi.append(coppie(
-    tile("Corse analizzate", f0(T.programmate), `${f0(T.effettuate)} effettuate, ${f0(T.soppresse)} soppresse totali, ${f0(T.parziali_senza_passaggio)} parziali senza passaggio`),
-    tile("Incidenza dei disservizi*", fp(T.pct_disservizi), `${f0(T.disservizi)} su ${f0(T.programmate)} corse`, "diss")),
-    coppie(tile("Ritardi di almeno 5'", fp(T.pct_ritardi_5), `${f0(T.n_ritardi_5)} su ${f0(T.effettuate)} corse effettuate`, "c1"),
-    tile("Ritardi di almeno 15'", fp(T.pct_ritardi_15), `${f0(T.n_ritardi_15)} su ${f0(T.effettuate)} corse effettuate`, "c2")),
-    coppie(tile("Soppressioni totali", fp(T.pct_soppresse), `${f0(T.soppresse)} su ${f0(T.programmate)} corse programmate`, "c3"),
-    tile("Soppressioni parziali", fp(T.pct_sopp_parziali), `${f0(T.sopp_parziali)} su ${f0(T.programmate)} corse programmate`, "c4")));
+    tile("Corse analizzate", f0(T.programmate), `${f0(T.effettuate)} ${pl(T.effettuate, "effettuata", "effettuate")}, ${f0(T.soppresse)} ${pl(T.soppresse, "soppressa", "soppresse")} totalmente, ${f0(T.parziali_senza_passaggio)} ${pl(T.parziali_senza_passaggio, "soppressa", "soppresse")} parzialmente`),
+    tile("Incidenza dei disservizi*", fp(T.pct_disservizi), `${f0(T.disservizi)} su ${f0(T.programmate)} ${pl(T.programmate, "corsa", "corse")}`, "diss")),
+    coppie(tile("Ritardi di almeno 5'", fp(T.pct_ritardi_5), `${f0(T.n_ritardi_5)} su ${f0(T.effettuate)} ${pl(T.effettuate, "corsa effettuata", "corse effettuate")}`, "c1"),
+    tile("Ritardi di almeno 15'", fp(T.pct_ritardi_15), `${f0(T.n_ritardi_15)} su ${f0(T.effettuate)} ${pl(T.effettuate, "corsa effettuata", "corse effettuate")}`, "c2")),
+    coppie(tile("Soppressioni totali", fp(T.pct_soppresse), `${f0(T.soppresse)} su ${f0(T.programmate)} ${pl(T.programmate, "corsa programmata", "corse programmate")}`, "c3"),
+    tile("Soppressioni parziali", fp(T.pct_sopp_parziali), `${f0(T.sopp_parziali)} su ${f0(T.programmate)} ${pl(T.programmate, "corsa programmata", "corse programmate")}`, "c4")));
   kpi.append(el("p", { class: "fonte" }, NOTA_DISS));
+  if (T.stimate) kpi.append(el("p", { class: "fonte" }, `Di cui con ritardo stimato dall'ultimo rilevamento: ${f0(T.stimate)} (vedi Metodologia).`));
+  if (T.nd) kpi.append(el("p", { class: "fonte" }, `Corse non classificabili (dato non disponibile): ${f0(T.nd)}. Sono escluse dai calcoli.`));
 
   /* andamento giornaliero */
   const gg = P.giorni;
   scheda(ids[0], {
     id: "g-andamento", titolo: "Percentuale di corse in ritardo e soppresse, per giorno", legenda: true,
-    desc: "Ogni punto è un giorno. Il punto vuoto è il giorno in corso, ancora incompleto. Ritardi: su corse effettuate. Soppressioni, totali e parziali: su corse programmate.",
+    desc: "Ogni punto è un giorno. Il punto vuoto è il giorno in corso, ancora incompleto." + (gg.some(g => g.senza_dati) ? " Gli spazi senza linea sono giorni senza dati (raccolta interrotta)." : "") + " Ritardi: su corse effettuate. Soppressioni, totali e parziali: su corse programmate.",
     disegna: plot => lineaAndamento(plot, gg),
     tabella: () => ({
       head: ["Giorno", "Corse programmate", "Effettuate", "Soppresse", "Soppresse in parte", "Ritardi di almeno 5'", "% almeno 5'", "Ritardi di almeno 15'", "% almeno 15'", "Ritardo medio (′)"],
-      rows: gg.map(g => [dm(g.data) + (g.parziale ? " (in corso)" : ""), f0(g.programmate), f0(g.effettuate), f0(g.soppresse), f0(g.sopp_parziali), f0(g.n_ritardi_5), fp(g.pct_ritardi_5), f0(g.n_ritardi_15), fp(g.pct_ritardi_15), f1(g.ritardo_medio)])
+      rows: gg.map(g => g.senza_dati ? [dm(g.data) + " (nessun dato)", "-", "-", "-", "-", "-", "-", "-", "-", "-"] : [dm(g.data) + (g.parziale ? " (in corso)" : ""), f0(g.programmate), f0(g.effettuate), f0(g.soppresse), f0(g.sopp_parziali), f0(g.n_ritardi_5), fp(g.pct_ritardi_5), f0(g.n_ritardi_15), fp(g.pct_ritardi_15), f1(g.ritardo_medio)])
     })
   });
 
@@ -387,7 +419,7 @@ function disegnaPeriodo() {
   scheda(ids[1], {
     id: "g-giorni", titolo: "Disservizi per giorno della settimana", legenda: true,
     desc: "Giorni completi (il giorno in corso è escluso). Il numero di giorni osservati compare nell'etichetta: con pochi giorni conta il singolo episodio.",
-    disegna: plot => barreVerticali(plot, dw.map(d => piccolo() ? NOMI_CORTI[d.nome] : d.nome), dw, d => `${d.giorni_osservati} giorni osservati, ${f0(d.programmate)} corse`),
+    disegna: plot => barreVerticali(plot, dw.map(d => piccolo() ? NOMI_CORTI[d.nome] : d.nome), dw, d => `${d.giorni_osservati} ${pl(d.giorni_osservati, "giorno osservato", "giorni osservati")}, ${f0(d.programmate)} ${pl(d.programmate, "corsa", "corse")}`),
     tabella: () => ({
       head: ["Giorno", "Giorni osservati", "Corse programmate", "% ritardi di almeno 5'", "% ritardi di almeno 15'", "% soppresse", "% soppresse in parte", "Ritardo medio (′)"],
       rows: dw.map(d => [d.nome, f0(d.giorni_osservati), f0(d.programmate), fp(d.pct_ritardi_5), fp(d.pct_ritardi_15), fp(d.pct_soppresse), fp(d.pct_sopp_parziali), f1(d.ritardo_medio)])
@@ -457,7 +489,7 @@ function disegnaTreni(box, treni) {
       const x = a[ordine], y = b[ordine]; if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
       return (typeof x === "string" ? x.localeCompare(y, "it", { numeric: true }) : x - y) * verso;
     });
-    info.textContent = `${rs.length} treni${rs.length !== treni.length ? ` (su ${treni.length})` : ""}. Clicca sulle intestazioni per ordinare.`;
+    info.textContent = `${rs.length} ${pl(rs.length, "treno", "treni")}${rs.length !== treni.length ? ` (su ${treni.length})` : ""}. Clicca sulle intestazioni per ordinare.`;
     corpo.replaceChildren(el("table", null,
       el("thead", null, el("tr", null, campi.map(([k, t, num]) => {
         const th = el("th", { class: "ord", text: t + (ordine === k ? (verso > 0 ? " ▲" : " ▼") : ""), tabindex: "0", style: num ? "" : "text-align:left" });
@@ -489,10 +521,11 @@ function disegnaDati() {
     el("ul", { class: "dl" },
       el("li", null, el("a", { href: "dati/corse_complete.csv", text: "corse_complete.csv" }), ": tutte le corse registrate, una riga per treno e direzione."),
       el("li", null, el("a", { href: "dati/riepilogo.json", text: "riepilogo.json" }), ": gli indicatori calcolati, usati da questa pagina.")),
-    files.length ? el("details", null, el("summary", { text: "File giornalieri (ultimi " + files.length + " giorni)" }),
-      el("div", { class: "files" }, files.slice().reverse().map(d => el("div", null, el("a", { href: `dati/corse/${d}.csv`, text: d + ".csv" }))))) : null,
-    el("p", { class: "fonte" }, "Il codice che raccoglie ed elabora i dati è pubblico: ", el("a", { href: "https://github.com/lucabonzanni/monitor-treni-bergamo", text: "codice e dati su GitHub" }), "."),
-    el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, parziale = soppressione parziale con Bergamo non servita, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); parziale (1 = soppressione parziale); stimato (1 = ritardo stimato dall'ultimo rilevamento); fermate_soppresse (fermate non effettuate, separate da |); motivo_ritardo. Citare: “elaborazione di Luca Bonzanni su dati ViaggiaTreno”."));
+    el("details", null,
+      el("summary", { text: files.length === 1 ? "File giornalieri (ultimo giorno)" : "File giornalieri (ultimi " + files.length + " giorni)" }),
+      el("div", { class: "files" }, files.slice().reverse().map(d => el("div", null, el("a", { href: `dati/corse/${d}.csv`, text: d + ".csv" })))),
+      el("p", { class: "fonte" }, el("strong", { text: "Colonne principali: " }), "data; direzione (partenza o arrivo da Bergamo); numero_treno; controparte (capolinea di origine o destinazione); orario_programmato e orario_reale; ritardo_min (negativo = anticipo); stato (effettuato, soppresso, parziale = soppressione parziale con Bergamo non servita, nd = dato non disponibile); via (percorso dei treni da e per Milano); provvedimento e tipo_treno (codici grezzi ViaggiaTreno); parziale (1 = soppressione parziale); stimato (1 = ritardo stimato dall'ultimo rilevamento); fermate_soppresse (fermate non effettuate, separate da |); motivo_ritardo. Citare: “elaborazione di Luca Bonzanni su dati ViaggiaTreno”.")),
+    el("p", { class: "fonte" }, "Il codice che raccoglie ed elabora i dati è pubblico: ", el("a", { href: "https://github.com/lucabonzanni/monitor-treni-bergamo", text: "codice e dati su GitHub" }), "."));
 }
 
 function disegnaMetodologia() {
@@ -503,8 +536,9 @@ function disegnaMetodologia() {
     ["Ritardo e puntualità", "Vengono segnalati i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Un treno in anticipo viene considerato comunque come puntuale."],
     ["Soppressioni", "Sono indicate come soppressioni totali solo le corse interamente non eseguite. Sono soppressioni parziali le corse che partono da una stazione diversa o terminano in una stazione diversa dal previsto (per esempio un Bergamo-Milano Centrale che parte da Treviglio Ovest invece che da Bergamo, o che termina a Verdello Dalmine): sono comunque un disservizio per chi viaggia da Bergamo. Le soppressioni parziali sono conteggiate a parte. Se la corsa passa comunque da Bergamo, il suo ritardo entra nel calcolo; se Bergamo non è servita, non c'è nessun orario da misurare. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
     ["Incidenza dei disservizi", "Somma le corse con ritardo di almeno 15 minuti, le soppressioni totali e le soppressioni parziali, rapportata alle corse monitorate. Ogni corsa è contata una sola volta, anche se ha più di un problema."],
+    ["Ritardi accumulati", "Sotto il tabellone di giornata compare la somma dei minuti di ritardo accumulati dai treni (non i minuti persi dai singoli passeggeri). Nella riga “Solo ritardi” si sommano i ritardi delle corse effettuate: contano i ritardi di almeno 2 minuti, perché un solo minuto potrebbe essere un arrotondamento, e gli anticipi valgono zero, senza compensare i ritardi. Nella riga “Ritardi + soppressioni” si aggiunge, per ogni soppressione totale o parziale senza passaggio a Bergamo, l'attesa tra l'orario programmato della corsa soppressa e il passaggio della corsa successiva della stessa tratta (stessa direzione e stesso capolinea). L'ultima corsa della giornata di ogni tratta non ha una successiva e non è conteggiata. Per la giornata in corso il dato è provvisorio."],
     ["Giorni lavorativi e fine settimana", "Quando i dati coprono almeno due settimane, il quadro complessivo si può restringere ai giorni lavorativi (lunedì-venerdì) o al fine settimana (sabato e domenica). Le festività infrasettimanali sono contate in base al giorno della settimana."],
-    ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (tutte quelle previste, con dato rilevato). Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte."],
+    ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (tutte quelle previste, con dato rilevato). Questo vale sia per la sezione di oggi sia per il quadro complessivo. Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte: il loro numero compare sotto i numeri del quadro quando ce ne sono."],
     ["Copertura", "La rilevazione è iniziata " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + " (non esiste uno storico precedente a tale data). Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione. Se ViaggiaTreno perde un treno nell'ultima stazione prima di Bergamo e la corsa, che ha Bergamo come capolinea, non risulta soppressa, dopo 30 minuti dall'arrivo atteso il ritardo viene stimato dall'ultimo rilevamento disponibile (colonna stimato nel file .csv)."],
     ["Direttrici", "Le corse sono raggruppate per capolinea (per esempio “Milano” comprende Centrale e Porta Garibaldi). Per Bergamo-Milano si distingue tra via Pioltello (treni che fermano a Treviglio o Pioltello) e via Carnate (treni che fermano a Carnate o Paderno d'Adda), in base alle fermate intermedie registrate da ViaggiaTreno. Le regole si modificano in config/direttrici.csv e si applicano a tutto lo storico." + (nc.length ? " Capolinea non ancora assegnati: " + nc.slice(0, 8).map(x => nomeStaz(x[0]) + " (" + x[1] + ")").join(", ") + "." : "")],
     ["Aggiornamento", "La raccolta parte automaticamente circa ogni 15 minuti; gli avvii possono subire ritardi, quindi i dati più recenti possono arrivare con qualche minuto di scarto. Ultimo aggiornamento dei dati: " + (D.aggiornato_il ? quando(D.aggiornato_il) : "-") + "."],

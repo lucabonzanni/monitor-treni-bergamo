@@ -85,11 +85,12 @@ h2 { font-size: 1.45rem; margin: 40px 0 8px; }
 
 /* indicatori */
 .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 14px 0 8px; }
+.kpis > .fonte { grid-column: 1 / -1; margin: 0; }
 .coppia { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .kpi { text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-.kpi .label { color: var(--ink); font-size: .9rem; font-weight: 700; }
+.kpi .label { color: var(--ink); font-size: .9rem; font-weight: 700; line-height: 1.3; min-height: 2.6em; display: flex; align-items: center; justify-content: center; }
 .kpi .value { font-size: 2.4rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
-.kpi .note { color: var(--muted); font-size: .82rem; }
+.kpi .note { color: var(--muted); font-size: .82rem; line-height: 1.35; }
 .kpi.diss { border-top: 3px solid var(--ink); }
 .kpi.c1 .value { color: var(--c1); } .kpi.c2 .value { color: var(--c2); } .kpi.c3 .value { color: var(--c3); } .kpi.c4 .value { color: var(--c4); }
 
@@ -125,6 +126,13 @@ tbody tr:hover { background: rgba(127, 127, 127, .09); }
 .fonte strong { color: var(--ink2); }
 .dati-periodo { margin: 8px 0 10px; font-size: .95rem; }
 .sc { max-height: 440px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.accumulo { margin: 18px 0 4px; }
+.accumulo h4 { margin: 0 0 8px; font-size: 1rem; font-weight: 800; letter-spacing: -.01em; }
+.accumulo .righe { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.accumulo .riga { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.accumulo .riga .t { color: var(--ink); font-weight: 700; font-size: .92rem; }
+.accumulo .riga .v { font-size: 1.5rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctrl .seg { margin-left: 6px; }
 .ctrl { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; font-size: .92rem; color: var(--ink2); }
 .stato { display: inline-flex; align-items: center; gap: 6px; }
 .stato i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
@@ -160,6 +168,9 @@ footer, footer a { font-weight: 700; }
   header::before { width: 420px; height: 420px; right: -160px; top: -30px; }
   .plot { height: 300px; }
   .kpi .value { font-size: 2rem; }
+  .accumulo .righe { grid-template-columns: 1fr; gap: 8px; }
+  .accumulo .riga { padding: 10px 12px; }
+  .accumulo .riga .v { font-size: 1.3rem; }
   .kpis { grid-template-columns: 1fr; gap: 10px; }
   .coppia { gap: 8px; }
   .kpi { padding: 12px 10px; }
