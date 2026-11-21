@@ -21,7 +21,7 @@ jobs:
         run: python scripts/raccolta.py
       - name: Aggregazione
         run: python scripts/aggrega.py
-      - name: Salva le novità nel repository
+           - name: Salva le novità nel repository
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
@@ -30,6 +30,10 @@ jobs:
             echo "Nessuna novità da salvare"
           else
             git commit -m "Aggiornamento dati $(TZ=Europe/Rome date '+%d/%m/%Y %H:%M')"
-            git pull --rebase
-            git push
+            if git pull --rebase; then
+              git push
+            else
+              echo "Conflitto con un altro aggiornamento: questo giro viene scartato, i dati arriveranno al prossimo"
+              git rebase --abort
+            fi
           fi
