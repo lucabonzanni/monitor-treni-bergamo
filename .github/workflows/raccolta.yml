@@ -21,7 +21,7 @@ jobs:
         run: python scripts/raccolta.py
       - name: Aggregazione
         run: python scripts/aggrega.py
-           - name: Salva le novità nel repository
+      - name: Salva le novità nel repository
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
