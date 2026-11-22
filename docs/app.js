@@ -288,10 +288,15 @@ function scheda(box, o) {
   rifai();
   if (o.suResize && "ResizeObserver" in window) {
     let w = plot.clientWidth;
-    new ResizeObserver(() => { if (plot.clientWidth !== w && !tabellaVisibile) { w = plot.clientWidth; o.disegna(plot); } }).observe(plot);
+    if (osservatori.has(box)) osservatori.get(box).disconnect();   // un solo osservatore per riquadro
+    const oss = new ResizeObserver(() => { if (plot.clientWidth !== w && !tabellaVisibile) { w = plot.clientWidth; o.disegna(plot); } });
+    oss.observe(plot);
+    osservatori.set(box, oss);
   }
   return { rifai };
 }
+
+const osservatori = new WeakMap();
 
 /* ---------- stato dei treni di oggi ---------- */
 function statoTreno(r) {
@@ -327,9 +332,9 @@ function giorniAcc(k) {
   const tutti = Object.keys(D.ritardi_accumulati || {}).sort();
   if (k === "oggi") return [D.oggi];
   if (k === "ieri") return [D.ieri];
-  if (k === "tutto") return tutti.concat(tutti.includes(D.oggi) ? [] : []);
+  if (k === "tutto") return tutti;
   const n = +k, lim = new Date(D.oggi + "T12:00:00"); lim.setDate(lim.getDate() - (n - 1));
-  const l = lim.toISOString().slice(0, 10);
+  const l = lim.getFullYear() + "-" + String(lim.getMonth() + 1).padStart(2, "0") + "-" + String(lim.getDate()).padStart(2, "0");
   return tutti.filter(g => g >= l && g <= D.oggi);
 }
 function sommaAcc(k) {
@@ -449,7 +454,9 @@ function disegnaFiltri() {
 
 function disegnaPeriodo() {
   disegnaFiltri();
-  const P = D.periodi[periodo + (D.giorni_con_dati >= 14 && tipoGiorni === "lav" ? "_lav" : D.giorni_con_dati >= 14 && tipoGiorni === "we" ? "_we" : "")], T = P.totale;
+  const suffTipo = tipoGiorni === "lav" ? "_lav" : tipoGiorni === "we" ? "_we" : "";
+  // la variante lavorativi/weekend esiste solo se il periodo contiene abbastanza giorni: altrimenti si usa il periodo intero
+  const P = D.periodi[periodo + suffTipo] || D.periodi[periodo], T = P.totale;
   const avviso = document.getElementById("avviso"); avviso.replaceChildren();
   const kpi = document.getElementById("kpi"); kpi.replaceChildren();
   const ids = ["c-andamento", "c-giorni", "c-direttrici", "c-orari", "c-treni"].map(i => document.getElementById(i));
@@ -498,7 +505,7 @@ function disegnaPeriodo() {
   });
 
   /* pulsanti di periodo, propri di direttrici e fasce orarie */
-  const suff = D.giorni_con_dati >= 14 && tipoGiorni === "lav" ? "_lav" : D.giorni_con_dati >= 14 && tipoGiorni === "we" ? "_we" : "";
+  const suff = tipoGiorni === "lav" ? "_lav" : tipoGiorni === "we" ? "_we" : "";
   const blocco = k => D.periodi[k + suff] || D.periodi[k];
   const pulsantiPeriodo = (iniziale, alCambio) => {
     const g = el("div", { class: "seg", role: "group", "aria-label": "Periodo" });
@@ -619,7 +626,7 @@ function disegnaMetodologia() {
     ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (tutte quelle previste, con dato rilevato). Questo vale sia per la sezione di oggi sia per il quadro complessivo. Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte: il loro numero compare sotto i numeri del quadro quando ce ne sono."],
     ["Copertura", "La rilevazione è iniziata " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + (D.stazioni && new Set(D.stazioni.map(x => x.data_inizio)).size > 1 ? " per Bergamo; " + D.stazioni.slice(1).map(x => x.nome + " è monitorata dal " + dataLunga(x.data_inizio).toLowerCase()).join(", ") + ": con l’ingresso di nuove stazioni, i dati complessivi cambiano definizione e i confronti con i giorni precedenti vanno fatti con cautela" : "") + " (non esiste uno storico precedente a tale data). I file scaricabili comprendono anche le giornate di collaudo precedenti, che non sono incluse nelle statistiche. Il servizio ferroviario tra Ponte San Pietro e Bergamo è sostituito da autobus: in questa fase, i treni da Lecco e da Milano via Carnate si fermano a Ponte San Pietro e compaiono solo nei dati di quella stazione. Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione. Se ViaggiaTreno perde un treno nell’ultima stazione prima di quella monitorata e la corsa, che ha la stazione come capolinea, non risulta soppressa, dopo 30 minuti dall’arrivo atteso il ritardo viene stimato dall’ultimo rilevamento disponibile (colonna stimato nel file .csv)."],
     ["Direttrici", "Per Bergamo-Milano si distingue tra via Pioltello (treni che fermano a Treviglio o Pioltello) e via Carnate (treni che fermano a Carnate o Paderno d’Adda), in base alle fermate intermedie registrate da ViaggiaTreno."],
-    ["Aggiornamento", "La raccolta parte automaticamente circa ogni 15 minuti; gli avvii possono subire ritardi, quindi i dati più recenti possono arrivare con qualche minuto di scarto. Ultimo aggiornamento dei dati: " + (D.aggiornato_il ? quando(D.aggiornato_il) : "-") + "."],
+    ["Aggiornamento", "La raccolta parte automaticamente circa ogni 15 minuti; gli avvii possono subire ritardi, quindi i dati più recenti possono arrivare con qualche minuto di scarto. Ultimo aggiornamento dei dati: " + (D.ultimo_giro || D.aggiornato_il ? quando(D.ultimo_giro || D.aggiornato_il) : "-") + "."],
     ["Interpretazione", "Le medie su pochi giorni risentono di singoli eventi (scioperi, guasti, lavori). Le tabelle indicano sempre il numero di corse su cui si basa ogni valore."]
   ];
   const det = el("details", { class: "tendina", id: "met-tendina" },
@@ -649,7 +656,7 @@ function disegnaCondividi() {
 
 function init(d) {
   D = d;
-  document.getElementById("stamp").textContent = d.aggiornato_il ? "Ultimo aggiornamento dei dati: " + quando(d.aggiornato_il) : "In attesa dei primi dati.";
+  document.getElementById("stamp").textContent = d.ultimo_giro || d.aggiornato_il ? "Ultimo aggiornamento dei dati: " + quando(d.ultimo_giro || d.aggiornato_il) : "In attesa dei primi dati.";
   disegnaCondividi(); disegnaOggi(); disegnaPeriodo(); disegnaDati(); disegnaMetodologia();
 }
 if (window.matchMedia) {
@@ -657,7 +664,17 @@ if (window.matchMedia) {
   const cambio = () => { if (D) disegnaPeriodo(); };
   if (mq.addEventListener) mq.addEventListener("change", cambio); else if (mq.addListener) mq.addListener(cambio);
 }
-fetch("dati/riepilogo.json", { cache: "no-store" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(init).catch(() => {
-  document.getElementById("stamp").textContent = "I dati non sono ancora disponibili: la prima raccolta non è ancora stata completata.";
-  disegnaCondividi();
-});
+// stato.json (facoltativo) contiene l'ora dell'ultimo giro di raccolta riuscito
+const caricaStato = () => fetch("dati/stato.json", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+fetch("dati/riepilogo.json", { cache: "no-store" })
+  .then(r => { if (r.status === 404) throw new Error("assenti"); if (!r.ok) throw new Error("rete"); return r.json().catch(() => { throw new Error("illeggibili"); }); })
+  .then(d => caricaStato().then(st => { if (st && st.ultima_raccolta) d.ultimo_giro = st.ultima_raccolta; init(d); }))
+  .catch(e => {
+    const m = e && e.message;
+    document.getElementById("stamp").textContent = m === "assenti"
+      ? "I dati non sono ancora disponibili: la prima raccolta non è ancora stata completata."
+      : m === "illeggibili"
+        ? "I dati sono stati pubblicati ma non è stato possibile leggerli. Riprova tra qualche minuto."
+        : "Al momento non è stato possibile caricare i dati. Controlla la connessione o riprova tra qualche minuto.";
+    disegnaCondividi();
+  });

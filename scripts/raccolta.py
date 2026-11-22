@@ -174,8 +174,8 @@ def dettaglio_corsa(riga):
 
 
 def data_vt(dt):
-    """Data nel formato che si aspetta ViaggiaTreno, es. 'Thu Nov 19 2026 13:14:00 GMT+0100 (CET)'."""
-    s = dt.strftime("%a %b %d %Y %H:%M:%S GMT%z") + " (CET)"
+    """Data nel formato che si aspetta ViaggiaTreno, es. 'Thu Nov 19 2026 13:14:00 GMT+0100 (CET)' (in estate CEST)."""
+    s = dt.strftime("%a %b %d %Y %H:%M:%S GMT%z") + f" ({dt.tzname() or 'CET'})"   # CET in inverno, CEST con l'ora legale
     return urllib.parse.quote(s, safe="")
 
 
@@ -209,6 +209,28 @@ def mezzanotte_ms(giorno):
     return int(d.timestamp() * 1000)
 
 
+# ------------------------------------------------------------------ scrittura sicura
+def scrivi_atomico(percorso, testo):
+    """Scrive in un file temporaneo e poi lo rinomina: se il programma si interrompe, il file vecchio resta intatto."""
+    percorso = Path(percorso)
+    percorso.parent.mkdir(parents=True, exist_ok=True)
+    tmp = percorso.with_name(percorso.name + ".tmp")
+    tmp.write_text(testo, encoding="utf-8")
+    os.replace(tmp, percorso)
+
+
+_PERICOLOSI = ("=", "+", "@", "\t", "\r")
+
+
+def proteggi(v):
+    """Excel interpreta come formula un testo che inizia con = + @: si antepone un apice (visibile solo nel file .csv)."""
+    return "'" + v if v.startswith(_PERICOLOSI) else v
+
+
+def ripristina(v):
+    return v[1:] if v.startswith("'") and v[1:].startswith(_PERICOLOSI) else v
+
+
 # ------------------------------------------------------------------ archivio CSV
 class Archivio:
     """Tiene in memoria i file CSV dei giorni toccati e li riscrive solo se cambiano."""
@@ -227,6 +249,7 @@ class Archivio:
             if f.exists():
                 testo = f.read_text(encoding="utf-8")
                 for r in csv.DictReader(io.StringIO(testo)):
+                    r = {k: ripristina(v) if isinstance(v, str) else v for k, v in r.items()}
                     if not r.get("stazione"):
                         r["stazione"] = STAZIONE  # righe registrate prima dell'arrivo delle altre stazioni: Bergamo
                     rows[r["id"]] = r
@@ -248,10 +271,10 @@ class Archivio:
             w = csv.DictWriter(buf, fieldnames=CAMPI, lineterminator="\n", extrasaction="ignore")
             w.writeheader()
             for r in sorted(rows.values(), key=lambda r: (int(r.get("ts_programmato") or 0), r["id"])):
-                w.writerow({c: r.get(c) or "" for c in CAMPI})
+                w.writerow({c: proteggi(r.get(c) or "") for c in CAMPI})
             nuovo = buf.getvalue()
             if nuovo != self.originali.get(giorno):
-                self._file(giorno).write_text(nuovo, encoding="utf-8")
+                scrivi_atomico(self._file(giorno), nuovo)
                 modificati += 1
         return modificati
 
@@ -530,8 +553,8 @@ def esegui(adesso=None):
     for riga in recenti[:MAX_RICONTROLLI]:
         d = dettaglio_corsa(riga)
         time.sleep(PAUSA)
-        ricontrollati += 1
         if isinstance(d, dict) and d:
+            ricontrollati += 1
             if aggiorna_da_dettaglio(riga, d, adesso_ms):
                 riga["aggiornato_il"] = adesso_iso
                 aggiornati += 1
@@ -549,6 +572,7 @@ def esegui(adesso=None):
         percorsi += 1
         if isinstance(d, dict) and d:
             riga["via"] = percorso(d) or "-"
+            riga["aggiornato_il"] = adesso_iso
 
     # --- 3. scadenza: dopo 6 ore senza dati il treno resta "nd" (non disponibile)
     scaduti = 0
@@ -560,6 +584,10 @@ def esegui(adesso=None):
             scaduti += 1
 
     file_modificati = arch.salva()
+    # segnala che il giro è andato a buon fine (la pagina mostra quest'ora come "ultimo aggiornamento")
+    scrivi_atomico(CARTELLA.parent / "stato.json", json.dumps(
+        {"ultima_raccolta": adesso_iso, "tabelle_lette": tabelle_ok, "tabelle_totali": len(OFFSET_TABELLE_MIN) * 2 * len(STAZIONI)},
+        separators=(",", ":")))
     print("Tabelle lette per stazione: " + ", ".join(f"{n} {k}/{len(OFFSET_TABELLE_MIN) * 2}" for n, k in per_stazione.items()))
     print(f"Tabelle lette: {tabelle_ok}/{len(OFFSET_TABELLE_MIN) * 2 * len(STAZIONI)} | treni visti: {viste} | nuovi: {nuovi} | "
           f"dettagli richiesti: {richiesti} | riletture: {ricontrollati} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "

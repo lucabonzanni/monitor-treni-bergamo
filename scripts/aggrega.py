@@ -81,6 +81,18 @@ def direttrice(da, a, regole, via=""):
     return ALTRE
 
 
+_PERICOLOSI = ("=", "+", "@", "\t", "\r")
+
+
+def proteggi(v):
+    """Excel interpreta come formula un testo che inizia con = + @: si antepone un apice (solo nel file .csv scaricabile)."""
+    return "'" + v if v.startswith(_PERICOLOSI) else v
+
+
+def ripristina(v):
+    return v[1:] if v.startswith("'") and v[1:].startswith(_PERICOLOSI) else v
+
+
 def leggi_corse(stazioni):
     inizio = {x["codice"]: x["data_inizio"] for x in stazioni}
     righe, tutte, intestazione = [], [], None   # "tutte" comprende anche i giorni precedenti all'inizio della rilevazione
@@ -89,6 +101,7 @@ def leggi_corse(stazioni):
             rd = csv.DictReader(fh)
             intestazione = list(intestazione or []) + [c for c in (rd.fieldnames or []) if c not in (intestazione or [])]
             for r in rd:
+                r = {k: (ripristina(v) if isinstance(v, str) else v) for k, v in r.items()}
                 r["_staz"] = (r.get("stazione") or "").strip() or STAZIONE_BASE
                 try:
                     r["_ts"] = int(r["ts_programmato"])
@@ -326,7 +339,9 @@ def scrivi_se_cambiato(percorso, testo):
     if percorso.exists() and percorso.read_text(encoding="utf-8") == testo:
         return False
     percorso.parent.mkdir(parents=True, exist_ok=True)
-    percorso.write_text(testo, encoding="utf-8")
+    tmp = percorso.with_name(percorso.name + ".tmp")
+    tmp.write_text(testo, encoding="utf-8")
+    os.replace(tmp, percorso)   # scrittura a prova di interruzione
     return True
 
 
@@ -423,9 +438,9 @@ def main():
         w = csv.DictWriter(buf, fieldnames=intestazione, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
         for r in tutte_le_righe:
-            w.writerow({c: r.get(c) or "" for c in intestazione})
+            w.writerow({c: proteggi(str(r.get(c) or "")) for c in intestazione})
     c2 = scrivi_se_cambiato(USCITA / "corse_complete.csv", buf.getvalue())
-    print(f"Aggregazione: {len(righe)} corse (da {len([r for r in tutte_le_righe if r["data"] >= DATA_INIZIO])} righe) in {len(date_con_dati)} giorni | "
+    print(f"Aggregazione: {len(righe)} corse (da {len([r for r in tutte_le_righe if r['data'] >= DATA_INIZIO])} righe) in {len(date_con_dati)} giorni | "
           f"riepilogo.json {'aggiornato' if c1 else 'invariato'} | corse_complete.csv {'aggiornato' if c2 else 'invariato'}")
     if non_classificate:
         print("Controparti non assegnate a una direttrice:", ", ".join(f"{n} ({c})" for n, c in non_classificate.most_common(10)))
