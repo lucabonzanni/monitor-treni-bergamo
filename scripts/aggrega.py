@@ -32,7 +32,7 @@ STAZIONE_BASE = "S01529"  # Bergamo: le righe registrate prima delle altre stazi
 SOGLIA = 5    # minuti: "ritardo" (da almeno 5')
 GRAVE = 15    # minuti: "ritardo grave" (da almeno 15')
 ALTRE = "Altre direttrici"
-DATA_INIZIO = os.environ.get("DATA_INIZIO", "2026-11-20")  # prima giornata piena di rilevazione
+DATA_INIZIO = os.environ.get("DATA_INIZIO", "2026-11-22")  # prima giornata piena di rilevazione
 SOGLIA_ACCUMULO = 2  # minuti: un ritardo di 1' può essere un arrotondamento, quindi non entra nei ritardi accumulati
 GIORNI_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 
@@ -83,15 +83,13 @@ def direttrice(da, a, regole, via=""):
 
 def leggi_corse(stazioni):
     inizio = {x["codice"]: x["data_inizio"] for x in stazioni}
-    righe, intestazione = [], None
+    righe, tutte, intestazione = [], [], None   # "tutte" comprende anche i giorni precedenti all'inizio della rilevazione
     for f in sorted(CARTELLA.glob("*.csv")):
         with f.open(encoding="utf-8", newline="") as fh:
             rd = csv.DictReader(fh)
             intestazione = list(intestazione or []) + [c for c in (rd.fieldnames or []) if c not in (intestazione or [])]
             for r in rd:
                 r["_staz"] = (r.get("stazione") or "").strip() or STAZIONE_BASE
-                if (r.get("data") or "") < inizio.get(r["_staz"], DATA_INIZIO):
-                    continue
                 try:
                     r["_ts"] = int(r["ts_programmato"])
                 except (KeyError, ValueError, TypeError):
@@ -100,8 +98,10 @@ def leggi_corse(stazioni):
                 dt = datetime.fromtimestamp(r["_ts"] / 1000, RM)
                 r["_ora"] = dt.hour
                 r["_dow"] = dt.weekday()
-                righe.append(r)
-    return righe, intestazione
+                tutte.append(r)
+                if (r.get("data") or "") >= inizio.get(r["_staz"], DATA_INIZIO):
+                    righe.append(r)
+    return righe, intestazione, tutte
 
 
 def estremi(rows, nome_vt):
@@ -333,14 +333,14 @@ def scrivi_se_cambiato(percorso, testo):
 def main():
     stazioni = leggi_stazioni()
     regole = leggi_regole()
-    righe_grezze, intestazione = leggi_corse(stazioni)
+    righe_grezze, intestazione, tutte_le_righe = leggi_corse(stazioni)
     # da qui in poi si lavora sulle unità treno-giorno (nessun doppione tra stazioni); righe_grezze serve solo al file .csv completo
     righe = unifica(righe_grezze, stazioni, regole)
     oggi = os.environ.get("OGGI") or datetime.now(RM).date().isoformat()
     oggi_d = datetime.fromisoformat(oggi).date()
 
     righe.sort(key=lambda r: (r["_ts"], r["id"]))
-    righe_grezze.sort(key=lambda r: (r["_ts"], r["id"]))
+    tutte_le_righe.sort(key=lambda r: (r["_ts"], r["id"]))
     date_con_dati = sorted({r["data"] for r in righe})
 
     def da(n_giorni):
@@ -411,8 +411,8 @@ def main():
         "ieri": ieri,
         "ieri_elenco": lista_ieri,
         "controparti_non_classificate": non_classificate.most_common(30),
-        "file_giornalieri": date_con_dati[-30:],
-        "totale_righe": len(righe_grezze),
+        "file_giornalieri": sorted(f.stem for f in CARTELLA.glob("*.csv"))[-30:],
+        "totale_righe": len(tutte_le_righe),
         "totale_corse": len(righe),
     }
     testo = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -422,10 +422,10 @@ def main():
     if intestazione:
         w = csv.DictWriter(buf, fieldnames=intestazione, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
-        for r in righe_grezze:
+        for r in tutte_le_righe:
             w.writerow({c: r.get(c) or "" for c in intestazione})
     c2 = scrivi_se_cambiato(USCITA / "corse_complete.csv", buf.getvalue())
-    print(f"Aggregazione: {len(righe)} corse (da {len(righe_grezze)} righe) in {len(date_con_dati)} giorni | "
+    print(f"Aggregazione: {len(righe)} corse (da {len([r for r in tutte_le_righe if r["data"] >= DATA_INIZIO])} righe) in {len(date_con_dati)} giorni | "
           f"riepilogo.json {'aggiornato' if c1 else 'invariato'} | corse_complete.csv {'aggiornato' if c2 else 'invariato'}")
     if non_classificate:
         print("Controparti non assegnate a una direttrice:", ", ".join(f"{n} ({c})" for n, c in non_classificate.most_common(10)))
