@@ -430,9 +430,11 @@ function disegnaOggi() {
   const selStaz = el("select", { id: "sel-staz", "aria-label": "Stazione" }, el("option", { value: "tutte", text: "Tutte le stazioni" }),
     ...stazioni.map(x => el("option", { value: x.codice, text: x.nome })));
   selStaz.addEventListener("change", e => { stazSel = e.target.value; ridisegna(); });
-  const cerca = el("input", { type: "search", id: "cerca-treno", inputmode: "numeric", autocomplete: "off", placeholder: "Cerca per numero di treno", "aria-label": "Cerca per numero di treno" });
+  const cerca = el("input", { type: "search", id: "cerca-treno", inputmode: "numeric", autocomplete: "off", placeholder: "Cerca il numero del treno", "aria-label": "Cerca per numero di treno" });
   cerca.addEventListener("input", e => { cercaNum = e.target.value.replace(/\D/g, ""); if (e.target.value !== cercaNum) e.target.value = cercaNum; ridisegna(); });   // solo cifre; trova i numeri che iniziano per quelle cifre
-  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5’ e soppressioni" }), stazioni.length > 1 ? selStaz : "", seg, cerca));
+  // due righe: prima casella e ricerca, poi stazione e arrivi/partenze
+  box.append(el("div", { class: "ctrl ctrl-riga" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5’ e soppressioni" }), cerca),
+    el("div", { class: "ctrl ctrl-riga" }, stazioni.length > 1 ? selStaz : "", seg));
   ridisegna(); box.append(wrap);
   box.append(el("p", { class: "fonte" }, el("strong", { text: "Nota: " }), "è indicato come “puntuale” il treno con un ritardo inferiore ai 5’. Ogni treno compare una sola volta, anche se passa da più stazioni. La colonna “Stazione” indica quella a cui è riferito il dato. Con “In transito” sono indicati i treni che non hanno capolinea nella stazione indicata" + (righe.some(r => r.stimato && r.stato === "effettuato") ? ". “Stima”: ritardo stimato dall’ultimo rilevamento disponibile, perché ViaggiaTreno non ha registrato l’arrivo nella stazione" : "")));
   disegnaAccumulo(box);

@@ -133,6 +133,9 @@ tbody tr:hover { background: rgba(127, 127, 127, .09); }
 .accumulo .riga .t { color: var(--ink); font-weight: 700; font-size: .92rem; }
 .accumulo .riga .v { font-size: 1.5rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctrl .seg { margin-left: 6px; }
+.ctrl-riga { margin: 0 0 8px; gap: 8px 16px; }
+.ctrl-riga .seg { margin-left: 0; }
+#cerca-treno { width: 17rem; max-width: 100%; margin-left: 8px; }
 .ctrl { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; font-size: .92rem; color: var(--ink2); }
 .stato { display: inline-flex; align-items: center; gap: 6px; }
 .stato i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
