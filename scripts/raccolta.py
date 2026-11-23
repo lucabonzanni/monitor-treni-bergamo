@@ -331,6 +331,23 @@ def fermata_stazione(d, codice=STAZIONE, nome="BERGAMO"):
 
 fermata_bergamo = fermata_stazione  # nome storico
 
+_dettagli_scartati = 0
+
+
+def dettaglio_incoerente(riga, d, f):
+    """True se il dettaglio appartiene a un altro treno con lo stesso numero (es. 2255 Milano Cadorna-Novara Nord al posto
+    del 2255 Milano Porta Garibaldi-Bergamo): la stazione monitorata non compare tra le fermate e nemmeno la controparte
+    indicata nella tabella della stazione. In dubbio (nessuna fermata, nessuna controparte) il dettaglio si considera valido."""
+    fermate = d.get("fermate") or []
+    if f is not None or not fermate:
+        return False
+    ctrp = (riga.get("controparte") or "").strip().upper()
+    if not ctrp:
+        return False
+    nomi = {str(x.get("stazione", "")).strip().upper() for x in fermate}
+    nomi |= {str(d.get("origine") or "").strip().upper(), str(d.get("destinazione") or "").strip().upper()}
+    return ctrp not in nomi
+
 
 def stazione_soppressa(lista, codice=STAZIONE, nome="BERGAMO"):
     """True se tra le fermate soppresse c'è la stazione (confronto esatto: Treviglio non è Treviglio Ovest)."""
@@ -401,6 +418,11 @@ def aggiorna_da_dettaglio(riga, d, adesso_ms):
     cod_st = riga.get("stazione") or STAZIONE
     nome_st = NOME_VT.get(cod_st, "BERGAMO")
     f = fermata_stazione(d, cod_st, nome_st)
+    if dettaglio_incoerente(riga, d, f):
+        global _dettagli_scartati
+        _dettagli_scartati += 1
+        print(f"  treno {riga['numero_treno']}: dettaglio scartato ({d.get('origine')} → {d.get('destinazione')}), non passa da {nome_st} né dalla controparte {riga.get('controparte')}")
+        return False
     for k_d, k_r in (("origine", "origine"), ("destinazione", "destinazione")):
         if d.get(k_d):
             riga[k_r] = str(d.get(k_d)).strip().upper()
@@ -590,7 +612,7 @@ def esegui(adesso=None):
         separators=(",", ":")))
     print("Tabelle lette per stazione: " + ", ".join(f"{n} {k}/{len(OFFSET_TABELLE_MIN) * 2}" for n, k in per_stazione.items()))
     print(f"Tabelle lette: {tabelle_ok}/{len(OFFSET_TABELLE_MIN) * 2 * len(STAZIONI)} | treni visti: {viste} | nuovi: {nuovi} | "
-          f"dettagli richiesti: {richiesti} | riletture: {ricontrollati} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "
+          f"dettagli richiesti: {richiesti} | dettagli scartati (altro treno con lo stesso numero): {_dettagli_scartati} | riletture: {ricontrollati} | aggiornati: {aggiornati} | percorsi: {percorsi} | scaduti (nd): {scaduti} | "
           f"file modificati: {file_modificati}")
     return 0
 

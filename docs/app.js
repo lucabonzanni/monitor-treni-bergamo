@@ -484,7 +484,7 @@ function disegnaPeriodo() {
   const gg = P.giorni;
   scheda(ids[0], {
     id: "g-andamento", chiave: "andamento", titolo: "Percentuale di corse in ritardo e soppresse, per giorno", legenda: true,
-    desc: "Ogni punto è un giorno. Il punto vuoto è il giorno in corso, ancora incompleto." + (gg.some(g => g.senza_dati) ? " Gli spazi senza linea sono giorni senza dati (raccolta interrotta)." : "") + " I ritardi sono calcolati sul totale delle corse effettuate. Le soppressioni, totali e parziali, sono calcolate sul totale delle corse programmate.",
+    desc: "Ogni punto è un giorno. Il punto vuoto è il giorno in corso, ancora incompleto." + (gg.some(g => g.senza_dati) ? " Gli spazi senza linea sono giorni senza dati (raccolta interrotta)." : "") + " I ritardi sono calcolati sul totale delle corse effettuate. Le soppressioni, totali e parziali, sono calcolate sul totale delle corse programmate (cliccando su ciascun indicatore è possibile selezionarlo o deselezionarlo).",
     disegna: plot => lineaAndamento(plot, gg),
     tabella: () => ({
       head: ["Giorno", "Corse programmate", "Effettuate", "Soppresse", "Soppresse in parte", "Ritardi di almeno 5’", "% almeno 5’", "Ritardi di almeno 15’", "% almeno 15’", "Ritardo medio (’)"],
@@ -496,7 +496,7 @@ function disegnaPeriodo() {
   const dw = P.giorno_settimana;
   scheda(ids[1], {
     id: "g-giorni", chiave: "giorni", titolo: "Disservizi per giorno della settimana", legenda: true,
-    desc: "Sono riepilogati solo i giorni completi (il giorno in corso viene escluso). Il numero di giorni osservati compare nell’etichetta.",
+    desc: "Sono riepilogati solo i giorni completi (il giorno in corso viene escluso). Il numero di giorni osservati compare nell’etichetta (cliccando su ciascun indicatore è possibile selezionarlo o deselezionarlo).",
     disegna: plot => barreVerticali(plot, dw.map(d => piccolo() ? NOMI_CORTI[d.nome] : d.nome), dw, d => `${d.giorni_osservati} ${pl(d.giorni_osservati, "giorno osservato", "giorni osservati")}, ${f0(d.programmate)} ${pl(d.programmate, "corsa", "corse")}`),
     tabella: () => ({
       head: ["Giorno", "Giorni osservati", "Corse programmate", "% ritardi di almeno 5’", "% ritardi di almeno 15’", "% soppresse", "% soppresse in parte", "Ritardo medio (’)"],
@@ -523,7 +523,7 @@ function disegnaPeriodo() {
   let scDir;
   scDir = scheda(ids[2], {
     id: "g-direttrici", chiave: "direttrici", titolo: "Disservizi per direttrice", legenda: true, controlli: pulsantiPeriodo(perDir, k => { perDir = k; scDir.rifai(); }),
-    desc: "Tipologia e incidenza di disagi per ciascuna linea.",
+    desc: "Tipologia e incidenza di disagi per ciascuna linea (cliccando su ciascun indicatore è possibile selezionarlo o deselezionarlo).",
     disegna: plot => { const r = dirDelPeriodo(); r.length ? barreOrizzontali(plot, r) : messaggio(plot, "Nessuna corsa per questo periodo."); },
     tabella: () => ({
       sx: false,

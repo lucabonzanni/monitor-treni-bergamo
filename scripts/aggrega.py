@@ -120,6 +120,8 @@ def leggi_corse(stazioni):
 def estremi(rows, nome_vt):
     """I due capolinea del treno (da, a), ricavati dalle sue righe: l'origine dalla riga di arrivo, la destinazione
     dalla riga di partenza; in mancanza, il capolinea è la stazione stessa o il dato del dettaglio della corsa."""
+    # le righe "nd" (dettaglio assente o di un altro treno con lo stesso numero) si usano solo se non ce ne sono di migliori
+    rows = [r for r in rows if r["stato"] != "nd"] or rows
     # prima il dato del dettaglio della corsa (capolinea veri), poi quello della tabella della stazione
     da = next(((r.get("origine") or "").strip().upper() for r in rows if (r.get("origine") or "").strip()), "")
     a = next(((r.get("destinazione") or "").strip().upper() for r in rows if (r.get("destinazione") or "").strip()), "")
