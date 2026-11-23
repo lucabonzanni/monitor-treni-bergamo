@@ -402,14 +402,16 @@ function disegnaOggi() {
       tile("Soppressioni parziali", f0(par), suCorse(par), "c4"))));
   box.append(el("p", { class: "fonte" }, NOTA_DISS));
   box.append(el("p", { class: "fonte nota-staz" }, el("em", { text: "Sono riportate le stazioni di Bergamo, Treviglio e Ponte San Pietro perché da esse transitano tutti i treni che interessano la provincia di Bergamo" })));
-  let soloAnomalie = false, dirTab = "tutti", stazSel = "tutte";
+  let soloAnomalie = false, dirTab = "tutti", stazSel = "tutte", cercaNum = "";
   const wrap = el("div", { class: "sc" });
   const cb = el("input", { type: "checkbox", id: "solo-anom" });
   cb.addEventListener("change", e => { soloAnomalie = e.target.checked; ridisegna(); });
   function ridisegna() {
     const rs = righe.filter(r => (dirTab === "tutti" || r.direzione === dirTab)
       && (stazSel === "tutte" || (r.stazioni || []).includes(stazSel))
-      && (!soloAnomalie || r.stato === "soppresso" || r.parziale || (r.ritardo || 0) >= 5));
+      && (!soloAnomalie || r.stato === "soppresso" || r.parziale || (r.ritardo || 0) >= 5)
+      && (!cercaNum || String(r.numero).startsWith(cercaNum)));
+    if (!rs.length) { wrap.replaceChildren(el("p", { class: "fonte", text: cercaNum ? "Nessun treno corrisponde alla ricerca." : "Nessun treno corrisponde ai filtri scelti." })); return; }
     wrap.replaceChildren(el("table", { class: "sx" },
       el("thead", null, el("tr", null, ["Orario", "Effettivo", "Stazione", "Direzione", "N. treno", "Tratta", "Stato"].map(h => el("th", { text: h })))),
       el("tbody", null, rs.map(r => el("tr", null,
@@ -428,7 +430,9 @@ function disegnaOggi() {
   const selStaz = el("select", { id: "sel-staz", "aria-label": "Stazione" }, el("option", { value: "tutte", text: "Tutte le stazioni" }),
     ...stazioni.map(x => el("option", { value: x.codice, text: x.nome })));
   selStaz.addEventListener("change", e => { stazSel = e.target.value; ridisegna(); });
-  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5’ e soppressioni" }), stazioni.length > 1 ? selStaz : "", seg));
+  const cerca = el("input", { type: "search", id: "cerca-treno", inputmode: "numeric", autocomplete: "off", placeholder: "Cerca per numero di treno", "aria-label": "Cerca per numero di treno" });
+  cerca.addEventListener("input", e => { cercaNum = e.target.value.replace(/\D/g, ""); if (e.target.value !== cercaNum) e.target.value = cercaNum; ridisegna(); });   // solo cifre; trova i numeri che iniziano per quelle cifre
+  box.append(el("div", { class: "ctrl" }, cb, el("label", { for: "solo-anom", text: "Mostra solo ritardi di almeno 5’ e soppressioni" }), stazioni.length > 1 ? selStaz : "", seg, cerca));
   ridisegna(); box.append(wrap);
   box.append(el("p", { class: "fonte" }, el("strong", { text: "Nota: " }), "è indicato come “puntuale” il treno con un ritardo inferiore ai 5’. Ogni treno compare una sola volta, anche se passa da più stazioni. La colonna “Stazione” indica quella a cui è riferito il dato. Con “In transito” sono indicati i treni che non hanno capolinea nella stazione indicata" + (righe.some(r => r.stimato && r.stato === "effettuato") ? ". “Stima”: ritardo stimato dall’ultimo rilevamento disponibile, perché ViaggiaTreno non ha registrato l’arrivo nella stazione" : "")));
   disegnaAccumulo(box);
