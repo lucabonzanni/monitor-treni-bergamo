@@ -52,6 +52,12 @@ function spezza(t, max) {
   return out.length > 1 ? out : t;
 }
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+// etichette dei grafici: se il nome è troppo lungo si abbreviano alcune stazioni (nelle tabelle e nelle etichette al passaggio resta il nome intero)
+function breve(t) {
+  t = String(t);
+  if (t.length <= 32) return t;
+  return t.replace("Milano Porta Garibaldi", "Milano PG").replace("Milano Centrale", "Milano Centr.").replace("Milano Lambrate", "Milano Lambr.");
+}
 const dm = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 const dmy = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4);
 const dataLunga = iso => cap(new Date(iso + "T12:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
@@ -196,7 +202,7 @@ function barreOrizzontali(plot, righe) {
     borderRadius: 4, borderSkipped: "start", maxBarThickness: 14
   }));
   disegnaGrafico("direttrici", plot, {
-    type: "bar", data: { labels: righe.map(r => piccolo() ? spezza(r.direttrice, 16) : r.direttrice), datasets: ds },
+    type: "bar", data: { labels: righe.map(r => piccolo() ? spezza(breve(r.direttrice), 16) : breve(r.direttrice)), datasets: ds },
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false, layout: { padding: { right: 8, top: 4 } },
       interaction: { mode: "index", axis: "y", intersect: false },
@@ -350,7 +356,7 @@ function disegnaAccumulo(box) {
     const x = sommaAcc(perAcc);
     if (!x.n) { vSolo.textContent = vTot.textContent = "n.d."; prima = { solo: 0, tot: 0 }; }
     else { contatore(vSolo, prima.solo, x.solo, orem); contatore(vTot, prima.tot, x.tot, orem); prima = { solo: x.solo, tot: x.tot }; }
-    nota.replaceChildren("Somma dei ritardi di almeno 2’ delle corse effettuate (gli anticipi non contano). Il secondo indicatore considera, per ogni soppressione, l’attesa fino alla corsa successiva della stessa tratta (escluso l’ultimo treno del giorno)."
+    nota.replaceChildren("Somma dei ritardi di almeno 5’ delle corse effettuate (gli anticipi non contano). Il secondo indicatore considera, per ogni soppressione, l’attesa fino alla corsa successiva della stessa tratta (escluso l’ultimo treno del giorno)."
       + (x.conOggi ? " Il dato comprende il giorno in corso, quindi è provvisorio." : "") + " Dettagli nella Metodologia");
   };
   PERIODI_ACC.forEach(([k, t]) => {
@@ -628,7 +634,7 @@ function disegnaMetodologia() {
     ["Ritardo e puntualità", "Vengono segnalati i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Un treno in anticipo viene considerato comunque come puntuale."],
     ["Soppressioni", "Sono indicate come soppressioni totali solo le corse interamente non eseguite. Sono soppressioni parziali le corse che partono da una stazione diversa o terminano in una stazione diversa dal previsto (per esempio un Bergamo-Milano Centrale che parte da Treviglio Ovest invece che da Bergamo, o che termina a Verdello Dalmine): sono comunque un disservizio per chi viaggia. Le soppressioni parziali sono conteggiate a parte. Se la corsa passa comunque dalla stazione monitorata, il suo ritardo entra nel calcolo; se la stazione non è servita, non c’è nessun orario da misurare. La classificazione è in fase di verifica sui casi reali: i codici grezzi sono nel file .csv."],
     ["Incidenza dei disservizi", "Somma le corse con ritardo di almeno 15 minuti, le soppressioni totali e le soppressioni parziali, rapportata alle corse monitorate. Ogni corsa è contata una sola volta, anche se ha più di un problema."],
-    ["Ritardi accumulati", "Sotto il tabellone di giornata compare la somma dei minuti di ritardo accumulati dai treni (non i minuti persi dai singoli passeggeri). Nella riga “Solo ritardi” si sommano i ritardi delle corse effettuate: contano i ritardi di almeno 2 minuti, perché un solo minuto potrebbe essere un arrotondamento, e gli anticipi valgono zero, senza compensare i ritardi. Nella riga “Ritardi + soppressioni” si aggiunge, per ogni soppressione totale o parziale senza passaggio nella stazione, l’attesa tra l’orario programmato della corsa soppressa e il passaggio della corsa successiva della stessa tratta (stessa stazione, stessa direzione e stesso capolinea). L’ultima corsa del giorno di ogni tratta non ne ha una successiva e non è conteggiata. Per il giorno in corso il dato è provvisorio."],
+    ["Ritardi accumulati", "Sotto il tabellone di giornata compare la somma dei minuti di ritardo accumulati dai treni (non i minuti persi dai singoli passeggeri). Nella riga “Solo ritardi” si sommano i ritardi delle corse effettuate: contano, per intero, i ritardi di almeno 5 minuti: la stessa soglia usata negli altri indicatori del portale, che esclude gli scostamenti minimi e tiene conto dell’incertezza della fonte, che arrotonda al minuto e può aggiornarsi con qualche ritardo. Un ritardo di 4 minuti non viene sommato, uno di 5 minuti viene sommato per intero; gli anticipi valgono zero, senza compensare i ritardi. Nella riga “Ritardi + soppressioni” si aggiunge, per ogni soppressione totale o parziale senza passaggio nella stazione, l’attesa tra l’orario programmato della corsa soppressa e il passaggio della corsa successiva della stessa tratta (stessa stazione, stessa direzione e stesso capolinea). L’ultima corsa del giorno di ogni tratta non ne ha una successiva e non è conteggiata. Per il giorno in corso il dato è provvisorio."],
     ["Giorni lavorativi e fine settimana", "Quando i dati coprono almeno due settimane, il quadro complessivo si può restringere ai giorni lavorativi (lunedì-venerdì) o al fine settimana (sabato e domenica). Le festività infrasettimanali sono contate in base al giorno della settimana."],
     ["Percentuali", "I ritardi sono calcolati sulle corse effettuate con dato rilevato; le soppressioni, totali e parziali, sulle corse programmate (tutte quelle previste, con dato rilevato). Questo vale sia per la sezione di oggi sia per il quadro complessivo. Le corse senza dato definitivo (nd) sono escluse dai calcoli e contate a parte: il loro numero compare sotto i numeri del quadro quando ce ne sono."],
     ["Copertura", "La rilevazione è iniziata " + (D.prima_data ? dataLunga(D.prima_data).toLowerCase() : "-") + (D.stazioni && new Set(D.stazioni.map(x => x.data_inizio)).size > 1 ? " per Bergamo; " + D.stazioni.slice(1).map(x => x.nome + " è monitorata dal " + dataLunga(x.data_inizio).toLowerCase()).join(", ") + ": con l’ingresso di nuove stazioni, i dati complessivi cambiano definizione e i confronti con i giorni precedenti vanno fatti con cautela" : "") + " (non esiste uno storico precedente a tale data). I file scaricabili comprendono anche i giorni di collaudo precedenti, che non sono incluse nelle statistiche. Il servizio ferroviario tra Ponte San Pietro e Bergamo è sostituito da autobus: in questa fase, i treni da Lecco e da Milano via Carnate si fermano a Ponte San Pietro e compaiono solo nei dati di quella stazione. Il dato di ogni corsa si completa dopo il passaggio del treno; un treno può non comparire se ViaggiaTreno non lo mostra nelle tabelle della stazione. Se ViaggiaTreno perde un treno nell’ultima stazione prima di quella monitorata e la corsa, che ha la stazione come capolinea, non risulta soppressa, dopo 30 minuti dall’arrivo atteso il ritardo viene stimato dall’ultimo rilevamento disponibile (colonna stimato nel file .csv)."],

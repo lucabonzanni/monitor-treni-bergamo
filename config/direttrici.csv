@@ -1,14 +1,17 @@
-estremo_1,estremo_2,direttrice,via
-BERGAMO,MILANO,Bergamo-Milano via Carnate,Carnate
-BERGAMO,MILANO,Bergamo-Milano via Pioltello,Pioltello
-BERGAMO,TREVIGLIO,Bergamo-Treviglio,
-BERGAMO,BRESCIA,Bergamo-Brescia,
-BERGAMO,LECCO,Bergamo-Lecco,
-BERGAMO,CREMONA,Bergamo-Cremona,
-PONTE S.PIETRO,MILANO,Milano-Ponte San Pietro via Carnate,
-PONTE S.PIETRO,LECCO,Lecco-Ponte San Pietro,
-TREVIGLIO,CREMONA,Treviglio-Cremona,
-TREVIGLIO,VARESE,Varese-Treviglio,
-TREVIGLIO,MILANO,Milano-Treviglio,
-MILANO,BRESCIA,Milano-Brescia via Treviglio,
-MILANO,VERONA,Milano-Verona via Treviglio,
+estremo_1,estremo_2,direttrice,via,numero_inizia
+BERGAMO,MILANO,Bergamo-Milano via Carnate,Carnate,
+BERGAMO,MILANO,Bergamo-Milano via Pioltello,Pioltello,
+BERGAMO,TREVIGLIO,Bergamo-Treviglio,,
+BERGAMO,BRESCIA,Bergamo-Brescia,,
+BERGAMO,LECCO,Bergamo-Lecco,,
+BERGAMO,CREMONA,Bergamo-Cremona,,
+PONTE S.PIETRO,MILANO,Milano-Ponte San Pietro via Carnate,,
+PONTE S.PIETRO,LECCO,Lecco-Ponte San Pietro,,
+TREVIGLIO,CREMONA,Cremona-Treviglio-Milano Porta Garibaldi,,
+CREMONA,MILANO PORTA GARIBALDI,Cremona-Treviglio-Milano Porta Garibaldi,,
+TREVIGLIO,VARESE,Varese-Treviglio,,
+TREVIGLIO,GALLARATE,Varese-Treviglio,,
+TREVIGLIO,MILANO,Varese-Treviglio,,245
+TREVIGLIO,NOVARA,Novara-Treviglio,,
+MILANO,BRESCIA,Milano-Brescia via Treviglio,,
+MILANO,VERONA,Milano-Verona via Treviglio,,

@@ -33,7 +33,7 @@ SOGLIA = 5    # minuti: "ritardo" (da almeno 5')
 GRAVE = 15    # minuti: "ritardo grave" (da almeno 15')
 ALTRE = "Altre direttrici"
 DATA_INIZIO = os.environ.get("DATA_INIZIO", "2026-11-22")  # prima giornata piena di rilevazione
-SOGLIA_ACCUMULO = 2  # minuti: un ritardo di 1' può essere un arrotondamento, quindi non entra nei ritardi accumulati
+SOGLIA_ACCUMULO = 5  # minuti: nei ritardi accumulati entrano per intero solo i ritardi di almeno 5' (stessa soglia degli altri indicatori)
 GIORNI_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 
 
@@ -64,17 +64,21 @@ def leggi_regole():
                 nome = (r.get("direttrice") or "").strip()
                 # colonna facoltativa: percorso richiesto (es. Carnate); vuota = qualsiasi
                 vie = [v.strip().upper() for v in (r.get("via") or "").split("|") if v.strip()]
+                # colonna facoltativa: la regola vale solo per i numeri di treno che iniziano così (es. 245); vuota = tutti
+                num = (r.get("numero_inizia") or "").strip()
                 if k1 and nome:
-                    regole.append((k1, k2, nome, vie))
+                    regole.append((k1, k2, nome, vie, num))
     return regole
 
 
-def direttrice(da, a, regole, via=""):
+def direttrice(da, a, regole, via="", numero=""):
     """Direttrice di un treno dai suoi due capolinea (da, a)."""
     d, z = (da or "").upper(), (a or "").upper()
     vu = (via or "").strip().upper()
-    for k1, k2, nome, vie in regole:
+    for k1, k2, nome, vie, num in regole:
         if vie and vu not in vie:
+            continue
+        if num and not str(numero or "").startswith(num):
             continue
         if (k1 in d and k2 in z) or (k1 in z and k2 in d) if k2 else (k1 in d or k1 in z):
             return nome
@@ -172,7 +176,7 @@ def unifica(righe, stazioni, regole):
         u["_stazioni"] = sorted({r["_staz"] for r in rows}, key=lambda c: prio.get(c, 99))
         vie = Counter(r.get("via") for r in rows if r.get("via") and r["via"] != "-").most_common(1)
         u["via"] = vie[0][0] if vie else (rif.get("via") or "")
-        u["_direttrice"] = direttrice(da, a, regole, u["via"])
+        u["_direttrice"] = direttrice(da, a, regole, u["via"], u["numero_treno"])
         unita.append(u)
     return unita
 
@@ -218,7 +222,7 @@ def statistiche(rows):
 
 def accumulo(rows_giorno):
     """Minuti di ritardo accumulati dai treni in una giornata.
-    - solo_ritardi: somma dei ritardi delle corse effettuate (da 2' in su; gli anticipi valgono zero e non compensano nulla).
+    - solo_ritardi: somma dei ritardi delle corse effettuate (da 5' in su; gli anticipi valgono zero e non compensano nulla).
     - attesa: per ogni corsa soppressa (totale, o parziale senza passaggio a Bergamo) i minuti tra il suo orario
       programmato e il passaggio della corsa successiva della stessa tratta (stessa direzione e stesso capolinea).
       L'ultima corsa della giornata di ogni tratta non ha successiva e non viene conteggiata."""
