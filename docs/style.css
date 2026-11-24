@@ -203,3 +203,5 @@ footer, footer a { font-weight: 700; }
 th.it, td.it { font-style: italic; }
 /* periodi dei ritardi accumulati */
 .accumulo .controls { margin: 0 0 10px; }
+
+#cerca-storico { width: 17rem; max-width: 100%; }

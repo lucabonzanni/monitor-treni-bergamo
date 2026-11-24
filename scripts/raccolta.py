@@ -48,8 +48,9 @@ ANTICIPO_DETTAGLIO_MIN = 10   # chiediamo il dettaglio dai 10 minuti prima dell'
 SCADENZA_ORE = 6              # dopo 6 ore senza dati definitivi il treno diventa "nd"
 MAX_DETTAGLI = 80             # limite di richieste di dettaglio per esecuzione
 ATTESA_STIMA_MIN = 30         # minuti oltre l'arrivo atteso, dopo i quali un capolinea non registrato viene stimato
-MAX_RICONTROLLI = 20          # limite di riletture di corse già effettuate (per cogliere soppressioni parziali tardive)
-RICONTROLLO_ORE = 2           # le corse effettuate vengono rilette per questo tempo dopo l'orario programmato
+MAX_RICONTROLLI = 24          # limite di riletture di corse già effettuate (per cogliere soppressioni parziali tardive)
+RICONTROLLO_RECENTI = 8       # di queste, le più recenti sono sempre riprese; le altre ruotano a ogni giro
+RICONTROLLO_ORE = 4           # le corse effettuate vengono rilette per questo tempo dopo l'orario programmato
 MAX_PERCORSI = 25             # limite di richieste per completare il percorso ("via") dei treni da/per Milano
 PAUSA = float(os.environ.get("PAUSA_RICHIESTE", "0.4"))
 
@@ -572,7 +573,13 @@ def esegui(adesso=None):
         and adesso_ms - RICONTROLLO_ORE * 3600000 <= int(r["ts_programmato"]) <= adesso_ms
     ]
     recenti.sort(key=lambda r: -int(r["ts_programmato"]))
-    for riga in recenti[:MAX_RICONTROLLI]:
+    # le più recenti ogni volta; le altre a rotazione (ogni corsa viene ripresa circa ogni ora)
+    altre = recenti[RICONTROLLO_RECENTI:]
+    n_rot = MAX_RICONTROLLI - RICONTROLLO_RECENTI
+    inizio = (adesso_ms // 900000 * n_rot) % len(altre) if altre else 0
+    ruotate = [altre[(inizio + i) % len(altre)] for i in range(min(n_rot, len(altre)))]
+    da_rileggere = recenti[:RICONTROLLO_RECENTI] + ruotate
+    for riga in da_rileggere:
         d = dettaglio_corsa(riga)
         time.sleep(PAUSA)
         if isinstance(d, dict) and d:
@@ -583,7 +590,7 @@ def esegui(adesso=None):
 
     # --- 2b. percorso (via Pioltello o via Carnate) dei treni da/per Milano che non lo hanno ancora
     percorsi = 0
-    gia = gia_letti | {r["id"] for r in recenti[:MAX_RICONTROLLI]}
+    gia = gia_letti | {r["id"] for r in da_rileggere}
     for riga in sorted(arch.tutte(), key=lambda r: -int(r["ts_programmato"])):
         if percorsi >= MAX_PERCORSI:
             break
