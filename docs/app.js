@@ -24,14 +24,15 @@ const NOTA_DISS = "* Quota delle corse con ritardi di almeno 15’ o soppression
 const FONTE = "elaborazione su dati ViaggiaTreno (portale Trenitalia)";
 const FONT = '"Rethink Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const nf1 = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const nf0 = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
-const f1 = v => v == null ? "n.d." : nf1.format(v);
-const f0 = v => v == null ? "n.d." : nf0.format(v);
-const fp = v => v == null ? "n.d." : nf1.format(v) + "%";
+// separatore delle migliaia sempre presente (anche per 1.049: la formattazione italiana di default lo omette sotto le 5 cifre)
+const sep = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+const f1 = v => v == null ? "n.d." : sep(nf1.format(v).split(",")[0]) + "," + nf1.format(v).split(",")[1];
+const f0 = v => v == null ? "n.d." : sep(Math.round(v));
+const fp = v => v == null ? "n.d." : f1(v) + "%";
 const pl = (n, sing, plur) => n === 1 ? sing : plur;
 const orem = m => { m = Math.round(m || 0); const h = Math.floor(m / 60), r = m % 60;
   const mm = r + (r === 1 ? " minuto" : " minuti");
-  if (!h) return mm; return h + (h === 1 ? " ora" : " ore") + (r ? " e " + mm : ""); };
+  if (!h) return mm; return sep(h) + (h === 1 ? " ora" : " ore") + (r ? " e " + mm : ""); };
 const RIDOTTO = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 /* i numeri "scorrono" fino al valore finale, come un contatore (disattivato se l'utente ha chiesto meno animazioni) */
 function contatore(span, a, b, fmt) {
@@ -109,7 +110,7 @@ function scalaValori(extra) {
   const s = {
     beginAtZero: true, suggestedMax: 5,
     grid: { color: css("--grid"), lineWidth: 1, borderDash: [1, 4], drawTicks: false }, border: { display: false },
-    ticks: { color: css("--muted"), padding: 8, callback: v => nf0.format(v) + "%" }
+    ticks: { color: css("--muted"), padding: 8, callback: v => sep(Math.round(v)) + "%" }
   };
   return Object.assign(s, extra || {});
 }
@@ -325,7 +326,7 @@ function statoBase(r) {
 }
 const coppie = (a, b) => el("div", { class: "coppia" }, a, b);
 const chipStato = s => el("span", { class: "stato" }, el("i", { style: "background:" + s.colore }), el("span", { class: "ico", text: s.ico }), s.testo);
-const tile = (l, big, d, cls) => el("div", { class: "kpi" + (cls ? " " + cls : "") }, el("div", { class: "label", text: l }), el("div", { class: "value", text: big }), el("div", { class: "note", text: d || " " }));
+const tile = (l, big, d, cls) => el("div", { class: "kpi" + (cls ? " " + cls : "") }, el("div", { class: "label", text: l }), el("div", { class: "value", text: big, style: "--n:" + Math.max(4, String(big).length) }), el("div", { class: "note", text: d || " " }));
 
 /* ---------- sezioni ---------- */
 let D = null, periodo = "tutto", tipoGiorni = "tutti";

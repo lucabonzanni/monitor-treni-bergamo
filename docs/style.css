@@ -89,7 +89,9 @@ h2 { font-size: 1.45rem; margin: 40px 0 8px; }
 .coppia { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .kpi { text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
 .kpi .label { color: var(--ink); font-size: .9rem; font-weight: 700; line-height: 1.3; min-height: 2.6em; display: flex; align-items: center; justify-content: center; }
-.kpi .value { font-size: 2.4rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.kpi { container-type: inline-size; }
+/* il numerone si rimpicciolisce da solo se ha molte cifre (--n = numero di caratteri), così non sborda dalla tessera */
+.kpi .value { --max: 2.4rem; font-size: var(--max); font-size: min(var(--max), calc((100cqw - 28px) / (var(--n, 5) * .62))); line-height: 1.15; font-variant-numeric: tabular-nums; }
 .kpi .note { color: var(--muted); font-size: .82rem; line-height: 1.35; }
 .kpi.diss { border-top: 3px solid var(--ink); }
 .kpi.c1 .value { color: var(--c1); } .kpi.c2 .value { color: var(--c2); } .kpi.c3 .value { color: var(--c3); } .kpi.c4 .value { color: var(--c4); }
@@ -170,7 +172,7 @@ footer, footer a { font-weight: 700; }
   header .sub { font-size: 1.1rem; }
   header::before { width: 420px; height: 420px; right: -160px; top: -30px; }
   .plot { height: 300px; }
-  .kpi .value { font-size: 2rem; }
+  .kpi .value { --max: 2rem; }
   .accumulo .righe { grid-template-columns: 1fr; gap: 8px; }
   .accumulo .riga { padding: 10px 12px; }
   .accumulo .riga .v { font-size: 1.3rem; }
