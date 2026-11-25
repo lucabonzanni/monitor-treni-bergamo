@@ -110,7 +110,13 @@ function scalaValori(extra) {
   const s = {
     beginAtZero: true, suggestedMax: 5,
     grid: { color: css("--grid"), lineWidth: 1, borderDash: [1, 4], drawTicks: false }, border: { display: false },
-    ticks: { color: css("--muted"), padding: 8, callback: v => sep(Math.round(v)) + "%" }
+    ticks: { color: css("--muted"), padding: 8, callback: (v, i, ticks) => {
+      // decimali solo quando servono (passo della scala sotto l’1%), così non si ripete lo stesso valore
+      const t = (ticks || []).map(x => x.value), ok = (x, m) => Math.abs(x * m - Math.round(x * m)) < 1e-6;
+      const dec = t.every(x => ok(x, 1)) ? 0 : t.every(x => ok(x, 10)) ? 1 : 2;
+      const [int, fr] = v.toFixed(dec).split(".");
+      return sep(int) + (fr ? "," + fr : "") + "%";
+    } }
   };
   return Object.assign(s, extra || {});
 }
@@ -259,15 +265,46 @@ function mappaCalore(plot, o) {
 }
 
 /* ---------- scheda: titolo, controlli, legenda, grafico, tabella, fonte ---------- */
-function tabellaEl(t) {
+/* valore di una cella → numero (formato italiano) oppure testo; "n.d." e "-" restano vuoti e finiscono sempre in fondo */
+function chiaveCella(v) {
+  const t = String(v).replace(/\s*\(.*\)\s*$/, "").trim();
+  if (t === "" || t === "-" || t === "n.d.") return null;
+  if (/^-?[\d.]+(,\d+)?%?$/.test(t)) return parseFloat(t.replace(/%$/, "").replace(/\./g, "").replace(",", "."));
+  return t;
+}
+function confronta(a, b, dir) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  const r = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "it", { numeric: true });
+  return r * dir;
+}
+function tabellaEl(t, stato, rifai) {
+  let righe = t.rows.map((r, i) => ({ r, i }));
+  if (t.ordina && stato && stato.col != null && stato.col < t.head.length) {
+    const c = stato.col;
+    const chiave = x => c === 0 && t.chiavi ? t.chiavi[x.i] : chiaveCella(x.r[c]);
+    righe = righe.map(x => ({ ...x, k: chiave(x) })).sort((a, b) => confronta(a.k, b.k, stato.dir) || a.i - b.i);
+  }
+  const intest = t.head.map((h, i) => {
+    if (!t.ordina || !stato) return el("th", { text: h });
+    const attiva = stato.col === i;
+    const btn = el("button", { type: "button", class: "ordbtn", title: "Ordina per questa colonna" }, h, el("span", { class: "freccia", text: attiva ? (stato.dir === 1 ? " ▲" : " ▼") : "" }));
+    btn.addEventListener("click", () => {
+      if (stato.col === i) stato.dir = -stato.dir; else { stato.col = i; stato.dir = 1; }
+      rifai();
+    });
+    return el("th", { "aria-sort": attiva ? (stato.dir === 1 ? "ascending" : "descending") : "none" }, btn);
+  });
   return el("table", t.sx ? { class: "sx" } : null,
-    el("thead", null, el("tr", null, t.head.map((h, i) => el("th", { text: h })))),
-    el("tbody", null, t.rows.map(r => el("tr", null, r.map(v => el("td", { text: v }))))));
+    el("thead", null, el("tr", null, intest)),
+    el("tbody", null, righe.map(x => el("tr", null, x.r.map(v => el("td", { text: v }))))));
 }
 function scheda(box, o) {
   const plot = el("div", { class: "plot" + (o.auto ? " auto" : "") });
   const wrap = el("div", { class: "tablewrap", hidden: true });
   let tabellaVisibile = false;
+  const statoOrd = { col: null, dir: 1 };
   const leg = o.legenda ? el("div", { class: "legend", role: "group", "aria-label": "Indicatori mostrati" }, LEG.map((l, i) => {
     const b = el("button", { type: "button", class: "leg-btn", "aria-pressed": String(ATTIVE[o.chiave].has(i)) }, el("span", { class: "sw", style: "background:var(" + l.css + ")" }), l.nome);
     b.addEventListener("click", () => {
@@ -291,7 +328,8 @@ function scheda(box, o) {
     o.controlli || null, leg, plot, wrap, btn,
     el("p", { class: "fonte" }, el("strong", { text: "Fonte: " }), FONTE));
   box.append(card);
-  const rifai = () => { if (!tabellaVisibile) o.disegna(plot); wrap.replaceChildren(tabellaEl(o.tabella())); };
+  const disegnaTabella = () => wrap.replaceChildren(tabellaEl(o.tabella(), statoOrd, disegnaTabella));
+  const rifai = () => { if (!tabellaVisibile) o.disegna(plot); disegnaTabella(); };
   rifai();
   if (o.suResize && "ResizeObserver" in window) {
     let w = plot.clientWidth;
@@ -500,6 +538,7 @@ function disegnaPeriodo() {
     desc: "Ogni punto rappresenta un singolo giorno; il punto vuoto indica il giorno in corso, ancora incompleto." + (gg.some(g => g.senza_dati) ? " Gli spazi senza linea sono giorni senza dati (raccolta interrotta)." : "") + " I ritardi sono calcolati sul totale delle corse effettuate; le soppressioni, sul totale delle corse programmate (cliccando su ciascun indicatore è possibile selezionarlo o deselezionarlo).",
     disegna: plot => lineaAndamento(plot, gg),
     tabella: () => ({
+      ordina: true, chiavi: gg.map(g => g.data),
       head: ["Giorno", "Corse programmate", "Effettuate", "Soppresse", "Soppresse in parte", "Ritardi di almeno 5’", "% almeno 5’", "Ritardi di almeno 15’", "% almeno 15’", "Ritardo medio (’)"],
       rows: gg.map(g => g.senza_dati ? [dm(g.data) + " (nessun dato)", "-", "-", "-", "-", "-", "-", "-", "-", "-"] : [dm(g.data) + (g.parziale ? " (in corso)" : ""), f0(g.programmate), f0(g.effettuate), f0(g.soppresse), f0(g.sopp_parziali), f0(g.n_ritardi_5), fp(g.pct_ritardi_5), f0(g.n_ritardi_15), fp(g.pct_ritardi_15), f1(g.ritardo_medio)])
     })
@@ -512,6 +551,7 @@ function disegnaPeriodo() {
     desc: "Sono riepilogati solo i giorni completi (il giorno in corso viene escluso). Il numero di giorni osservati compare nell’etichetta (cliccando su ciascun indicatore è possibile selezionarlo o deselezionarlo).",
     disegna: plot => barreVerticali(plot, dw.map(d => piccolo() ? NOMI_CORTI[d.nome] : d.nome), dw, d => `${d.giorni_osservati} ${pl(d.giorni_osservati, "giorno osservato", "giorni osservati")}, ${f0(d.programmate)} ${pl(d.programmate, "corsa", "corse")}`),
     tabella: () => ({
+      ordina: true, chiavi: dw.map((d, i) => i),
       head: ["Giorno", "Giorni osservati", "Corse programmate", "% ritardi di almeno 5’", "% ritardi di almeno 15’", "% soppresse", "% soppresse in parte", "Ritardo medio (’)"],
       rows: dw.map(d => [d.nome, f0(d.giorni_osservati), f0(d.programmate), fp(d.pct_ritardi_5), fp(d.pct_ritardi_15), fp(d.pct_soppresse), fp(d.pct_sopp_parziali), f1(d.ritardo_medio)])
     })
@@ -539,7 +579,7 @@ function disegnaPeriodo() {
     desc: "Tipologia e incidenza di disagi per ciascuna linea (cliccando su ciascun indicatore è possibile selezionarlo o deselezionarlo).",
     disegna: plot => { const r = dirDelPeriodo(); r.length ? barreOrizzontali(plot, r) : messaggio(plot, "Nessuna corsa per questo periodo."); },
     tabella: () => ({
-      sx: false,
+      sx: false, ordina: true,
       head: ["Direttrice", "Corse programmate", "Effettuate", "Soppresse", "Soppresse in parte", "% ritardi di almeno 5’", "% ritardi di almeno 15’", "% soppresse", "% soppresse in parte", "Ritardo medio (’)"],
       rows: dirDelPeriodo().map(d => [d.direttrice, f0(d.programmate), f0(d.effettuate), f0(d.soppresse), f0(d.sopp_parziali), fp(d.pct_ritardi_5), fp(d.pct_ritardi_15), fp(d.pct_soppresse), fp(d.pct_sopp_parziali), f1(d.ritardo_medio)])
     })
@@ -629,7 +669,7 @@ function disegnaDati() {
 function disegnaMetodologia() {
   const nc = D.controparti_non_classificate || [];
   const voci = [
-    ["Fonte", "I dati sono elaborati sulla base del sistema pubblico ViaggiaTreno (Rfi/Trenitalia), che raccoglie anche i treni regionali Trenord. Non è un’Api ufficialmente documentata (può cambiare o interrompersi senza preavviso)."],
+    ["Fonte", "I dati sono elaborati sulla base del sistema pubblico ViaggiaTreno (Rfi/Trenitalia), che raccoglie anche i treni regionali Trenord. Non è un’Api ufficialmente documentata (può cambiare o interrompersi senza preavviso). Il codice è stato sviluppato con il supporto di Claude e verificato con ChatGPT e Gemini; quotidianamente vengono effettuati dei controlli a campione da parte dell’autore, confrontando gli esiti del monitoraggio con le informazioni pubblicate sul sito di Trenord."],
     ["Stazioni monitorate", "Il portale segue i treni regionali che toccano le stazioni di " + ((D.stazioni || []).map(x => x.nome).join(", ") || "Bergamo") + ", per avere un quadro dei treni della Bergamasca. Sono esclusi Frecce, Intercity, Euronight e gli altri treni a lunga percorrenza. Ogni corsa è contata una sola volta, anche se passa da più stazioni monitorate o compare sia in arrivo sia in partenza: il dato è quello della stazione con priorità più alta (nell’ordine: Bergamo, Treviglio, Ponte San Pietro), salvo che in quella stazione non sia disponibile."],
     ["Cosa viene misurato", "Per ogni treno che parte, arriva o transita in una stazione monitorata, viene misurata la differenza tra l’orario programmato e quello reale registrato in quella stazione (per le partenze conta l’orario di partenza, per gli arrivi e i transiti l’orario di arrivo)."],
     ["Ritardo e puntualità", "Vengono segnalati i treni con almeno 5 minuti di ritardo e con almeno 15 minuti di ritardo. Un treno in anticipo viene considerato comunque come puntuale."],
